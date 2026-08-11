@@ -1,0 +1,228 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>SDO Semantic Observability</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>SDO Semantic Observability</h1>
+        <p>
+          Central view across participating TSG systems
+          <span id="refreshStatus" class="refresh-status"></span>
+        </p>
+      </div>
+      <div class="topbar-actions">
+        <label class="auto-refresh-toggle">
+          <input id="autoRefreshToggle" type="checkbox" checked />
+          Auto refresh
+        </label>
+        <button id="refreshButton" type="button">Refresh</button>
+      </div>
+    </header>
+
+    <div class="app-shell" id="appShell">
+      <button id="filterShowButton" class="filter-show-button" type="button" title="Show filters"></button>
+      <aside class="filters" id="filtersPanel">
+        <div class="filters-header">
+          <h2>Filters</h2>
+          <button id="filterToggleButton" class="filter-arrow-button" type="button" title="Hide filters"></button>
+        </div>
+        <div class="filters-body">
+          <label>
+            Participant
+            <input id="participantFilter" placeholder="participant id" />
+          </label>
+          <label>
+            Metric
+            <select id="metricFilter">
+              <option value="">All key metrics</option>
+              <option value="semantic_model_coverage">Semantic model / ontology coverage</option>
+              <option value="schema_reference_coverage">Schema reference coverage</option>
+              <option value="artefact_version_adoption_rate">Artefact version adoption</option>
+              <option value="deprecated_artefact_usage_rate">Deprecated artefact usage</option>
+              <option value="validation_error_rate">Semantic validation error rate</option>
+              <option value="version_validation_errors">Validation errors by governed version</option>
+              <option value="semantic_field_usage">Governed semantic field usage</option>
+            </select>
+          </label>
+          <label>
+            Ontology / Artefact
+            <select id="ontologyFilter">
+              <option value="">All semantic artefacts</option>
+            </select>
+          </label>
+          <label>
+            Artefact Type
+            <select id="artefactTypeFilter">
+              <option value="">All artefact types</option>
+            </select>
+          </label>
+          <label>
+            Version
+            <select id="artefactVersionFilter">
+              <option value="">All versions</option>
+            </select>
+          </label>
+          <label>
+            Deprecated
+            <select id="deprecatedFilter">
+              <option value="">All</option>
+              <option value="true">Deprecated only</option>
+              <option value="false">Active / unknown</option>
+            </select>
+          </label>
+          <label>
+            Status
+            <select id="statusFilter">
+              <option value="">All</option>
+              <option value="success">Success</option>
+              <option value="failure">Failure</option>
+              <option value="warning">Warning</option>
+              <option value="info">Info</option>
+            </select>
+          </label>
+          <div class="date-range-filter">
+            <div class="filter-label">Date range</div>
+            <div class="date-fieldset">
+              <div class="date-fieldset-title">From</div>
+              <div class="date-box-grid">
+                <input id="dateFromDay" type="number" min="1" max="31" aria-label="From day" />
+                <select id="dateFromMonth" aria-label="From month"></select>
+                <input id="dateFromYear" type="number" min="2020" aria-label="From year" />
+              </div>
+            </div>
+            <div class="date-fieldset">
+              <div class="date-fieldset-title">To</div>
+              <div class="date-box-grid">
+                <input id="dateToDay" type="number" min="1" max="31" aria-label="To day" />
+                <select id="dateToMonth" aria-label="To month"></select>
+                <input id="dateToYear" type="number" min="2020" aria-label="To year" />
+              </div>
+            </div>
+            <div id="dateRangeLabel" class="date-slider-label"></div>
+          </div>
+        </div>
+      </aside>
+
+      <main>
+      <section class="summary-grid" id="summaryGrid"></section>
+
+      <section class="metric-story-list" id="visualizationGrid"></section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Selected Ontology / Artefact</h2>
+          <span id="ontologyCount"></span>
+        </div>
+        <div id="selectedOntology" class="selected-ontology"></div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Registered Participants</h2>
+          <span id="participantCount"></span>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Participant</th>
+                <th>Display name</th>
+                <th>Status</th>
+                <th>Events</th>
+                <th>Failures</th>
+                <th>Last seen</th>
+              </tr>
+            </thead>
+            <tbody id="participantsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Data Sharing Transactions</h2>
+          <div class="panel-actions">
+            <span id="transactionCount"></span>
+            <button id="transactionShowMoreButton" class="panel-action-button" type="button">Show more</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Participants</th>
+                <th>Dataset</th>
+                <th>Events</th>
+                <th>Signals</th>
+                <th>Last seen</th>
+              </tr>
+            </thead>
+            <tbody id="transactionsBody"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <div class="panel-header">
+          <h2>Recent Observability Events</h2>
+          <div class="panel-actions">
+            <span id="eventCount"></span>
+            <button id="eventShowMoreButton" class="panel-action-button" type="button">Show more</button>
+          </div>
+        </div>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Participant</th>
+                <th>Signal</th>
+                <th>Status</th>
+                <th>Dataset</th>
+                <th>Failure</th>
+              </tr>
+            </thead>
+            <tbody id="eventsBody"></tbody>
+          </table>
+        </div>
+      </section>
+      </main>
+    </div>
+
+    <div id="drilldownOverlay" class="drilldown-overlay" hidden>
+      <section class="drilldown-panel" role="dialog" aria-modal="true" aria-labelledby="drilldownTitle">
+        <div class="drilldown-header">
+          <div>
+            <h2 id="drilldownTitle">Drill down</h2>
+            <p id="drilldownSubtitle"></p>
+          </div>
+          <button id="drilldownCloseButton" class="drilldown-close-button" type="button" aria-label="Close drill down">x</button>
+        </div>
+        <div class="drilldown-table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Time</th>
+                <th>Participant</th>
+                <th>Status</th>
+                <th>Signal</th>
+                <th>Dataset</th>
+                <th>Transaction</th>
+                <th>Artefacts</th>
+              </tr>
+            </thead>
+            <tbody id="drilldownBody"></tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+
+    <script src="/app.js" type="module"></script>
+  </body>
+</html>

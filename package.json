@@ -1,0 +1,17 @@
+{
+  "name": "sdo-semantic-observability",
+  "version": "0.1.0",
+  "description": "Central SDO semantic observability collector and dashboard",
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test",
+    "check": "node --check src/server.js && node --check src/storage.js && node --check src/semantic.js && node --check public/app.js && npm test"
+  },
+  "dependencies": {
+    "pg": "^8.13.1"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

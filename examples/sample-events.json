@@ -1,0 +1,74 @@
+{
+  "participantId": "alfa",
+  "events": [
+    {
+      "eventId": "sample-catalog-1",
+      "timestamp": "2026-07-07T09:00:00.000Z",
+      "component": "control-plane",
+      "eventType": "catalog.metadata.observed",
+      "dimensions": ["adoption", "evolution"],
+      "status": "success",
+      "context": {
+        "participantPseudonym": "p_alfa",
+        "remoteParticipantPseudonym": "p_bravo",
+        "participantPairPseudonym": "p_alfa_bravo",
+        "datasetPseudonym": "p_dataset_weather",
+        "correlationId": "p_tx_001"
+      },
+      "artefacts": [
+        {
+          "type": "semantic-model",
+          "reference": "p_model_weather",
+          "version": "1.0.0"
+        },
+        {
+          "type": "schema",
+          "reference": "p_schema_weather",
+          "version": "1.0.0"
+        }
+      ],
+      "metadataCompletenessScore": 1,
+      "attributes": {
+        "action": "created"
+      }
+    },
+    {
+      "eventId": "sample-policy-1",
+      "timestamp": "2026-07-07T09:01:00.000Z",
+      "component": "control-plane",
+      "eventType": "policy.evaluation.result",
+      "dimensions": ["friction", "stability"],
+      "status": "success",
+      "context": {
+        "participantPseudonym": "p_alfa",
+        "remoteParticipantPseudonym": "p_bravo",
+        "participantPairPseudonym": "p_alfa_bravo",
+        "datasetPseudonym": "p_dataset_weather",
+        "correlationId": "p_tx_001"
+      },
+      "attributes": {
+        "decision": "ALLOW"
+      }
+    },
+    {
+      "eventId": "sample-access-1",
+      "timestamp": "2026-07-07T09:02:00.000Z",
+      "component": "http-data-plane",
+      "eventType": "data-plane.access.observed",
+      "dimensions": ["stability"],
+      "status": "success",
+      "context": {
+        "participantPseudonym": "p_alfa",
+        "remoteParticipantPseudonym": "p_bravo",
+        "participantPairPseudonym": "p_alfa_bravo",
+        "datasetPseudonym": "p_dataset_weather",
+        "correlationId": "p_tx_001",
+        "transferId": "p_transfer_001"
+      },
+      "attributes": {
+        "method": "GET",
+        "httpStatus": 200
+      }
+    }
+  ]
+}
