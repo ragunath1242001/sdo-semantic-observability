@@ -100,9 +100,12 @@ const server = createServer(async (request, response) => {
       const filtered = filterEvents(events, queryFilter(url)).sort((a, b) =>
         String(b.timestamp).localeCompare(String(a.timestamp))
       );
-      const take = Math.min(Number(url.searchParams.get("take") ?? 100), 500);
+      const requestedTake = Number(url.searchParams.get("take") ?? 100);
+      const requestedSkip = Number(url.searchParams.get("skip") ?? 0);
+      const take = Number.isInteger(requestedTake) ? Math.min(Math.max(requestedTake, 1), 500) : 100;
+      const skip = Number.isInteger(requestedSkip) ? Math.max(requestedSkip, 0) : 0;
       return json(response, 200, {
-        data: filtered.slice(0, take),
+        data: filtered.slice(skip, skip + take),
         total: filtered.length
       });
     }

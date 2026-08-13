@@ -29,6 +29,9 @@ export function buildReport(events, filter = {}) {
     generatedAt: now,
     timeWindowStart: start,
     timeWindowEnd: end,
+    participantCount: new Set(
+      filtered.map((event) => event.source?.participantId).filter(Boolean)
+    ).size,
     adoption: adoptionMetrics(filtered, start, end),
     friction: frictionMetrics(filtered, start, end),
     evolution: evolutionMetrics(filtered, start, end),

@@ -4,18 +4,39 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>SDO Semantic Observability</title>
+    <script>
+      try {
+        if (localStorage.getItem("sdo-theme") === "dark") document.documentElement.dataset.theme = "dark";
+      } catch {}
+    </script>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&amp;family=Sora:wght@500;600;700&amp;display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
     <header class="topbar">
-      <div>
-        <h1>SDO Semantic Observability</h1>
-        <p>
-          Central view across participating TSG systems
-          <span id="refreshStatus" class="refresh-status"></span>
-        </p>
+      <div class="brand-cluster">
+        <img
+          class="tno-logo"
+          src="https://www.tno.nl/publish/pages/1547/tno-ifl.svg"
+          alt="TNO innovation for life"
+        />
+        <div class="brand-rule" aria-hidden="true"></div>
+        <div>
+          <h1>SDO Semantic Observability</h1>
+          <p>
+            Central view across participating TSG systems
+            <span id="refreshStatus" class="refresh-status"></span>
+          </p>
+        </div>
       </div>
       <div class="topbar-actions">
+        <label class="theme-toggle">
+          <input id="themeToggle" type="checkbox" role="switch" />
+          <span class="toggle-track" aria-hidden="true"></span>
+          Dark mode
+        </label>
         <label class="auto-refresh-toggle">
           <input id="autoRefreshToggle" type="checkbox" checked />
           Auto refresh
@@ -85,30 +106,49 @@
               <option value="info">Info</option>
             </select>
           </label>
-          <div class="date-range-filter">
-            <div class="filter-label">Date range</div>
-            <div class="date-fieldset">
-              <div class="date-fieldset-title">From</div>
-              <div class="date-box-grid">
-                <input id="dateFromDay" type="number" min="1" max="31" aria-label="From day" />
-                <select id="dateFromMonth" aria-label="From month"></select>
-                <input id="dateFromYear" type="number" min="2020" aria-label="From year" />
-              </div>
-            </div>
-            <div class="date-fieldset">
-              <div class="date-fieldset-title">To</div>
-              <div class="date-box-grid">
-                <input id="dateToDay" type="number" min="1" max="31" aria-label="To day" />
-                <select id="dateToMonth" aria-label="To month"></select>
-                <input id="dateToYear" type="number" min="2020" aria-label="To year" />
-              </div>
-            </div>
-            <div id="dateRangeLabel" class="date-slider-label"></div>
-          </div>
         </div>
       </aside>
 
       <main>
+      <div class="dashboard-toolbar">
+        <h2>Semantic overview</h2>
+        <details id="dateRangeMenu" class="date-range-menu">
+          <summary>
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M7 3v3m10-3v3M4 9h16M5 5h14a1 1 0 0 1 1 1v14H4V6a1 1 0 0 1 1-1Z" />
+            </svg>
+            <span id="dateRangeLabel"></span>
+          </summary>
+          <div class="date-range-popover">
+            <div class="date-presets" aria-label="Date range presets">
+              <button type="button" data-date-preset="1">Last hour</button>
+              <button type="button" data-date-preset="12">Last 12 hours</button>
+              <button type="button" data-date-preset="24">Last 24 hours</button>
+              <button type="button" data-date-preset="168">Last 7 days</button>
+              <button type="button" data-date-preset="720">Last 30 days</button>
+              <button type="button" data-date-preset="2160">Last 90 days</button>
+              <button class="date-preset-all" type="button" data-date-preset="all">All history</button>
+            </div>
+            <div class="date-range-filter">
+              <div class="date-fieldset">
+                <label class="date-fieldset-title" for="dateFrom">From</label>
+                <input id="dateFrom" class="time-point-input" type="datetime-local" />
+                <button class="time-point-now" type="button" data-date-now="from">Now</button>
+              </div>
+              <div class="date-fieldset">
+                <label class="date-fieldset-title" for="dateTo">To</label>
+                <input id="dateTo" class="time-point-input" type="datetime-local" />
+                <button class="time-point-now" type="button" data-date-now="to">Now</button>
+              </div>
+            </div>
+            <div class="date-range-actions">
+              <button id="dateCancelButton" type="button">Cancel</button>
+              <button id="dateApplyButton" class="primary-button" type="button">Apply</button>
+            </div>
+          </div>
+        </details>
+      </div>
+
       <section class="summary-grid" id="summaryGrid"></section>
 
       <section class="metric-story-list" id="visualizationGrid"></section>

@@ -4,6 +4,7 @@ const elements = {
   filterShowButton: document.querySelector("#filterShowButton"),
   filtersPanel: document.querySelector("#filtersPanel"),
   refreshButton: document.querySelector("#refreshButton"),
+  themeToggle: document.querySelector("#themeToggle"),
   autoRefreshToggle: document.querySelector("#autoRefreshToggle"),
   refreshStatus: document.querySelector("#refreshStatus"),
   participantFilter: document.querySelector("#participantFilter"),
@@ -13,12 +14,14 @@ const elements = {
   artefactVersionFilter: document.querySelector("#artefactVersionFilter"),
   deprecatedFilter: document.querySelector("#deprecatedFilter"),
   statusFilter: document.querySelector("#statusFilter"),
-  dateFromDay: document.querySelector("#dateFromDay"),
-  dateFromMonth: document.querySelector("#dateFromMonth"),
-  dateFromYear: document.querySelector("#dateFromYear"),
-  dateToDay: document.querySelector("#dateToDay"),
-  dateToMonth: document.querySelector("#dateToMonth"),
-  dateToYear: document.querySelector("#dateToYear"),
+  dateRangeMenu: document.querySelector("#dateRangeMenu"),
+  dateRangeSummary: document.querySelector("#dateRangeMenu summary"),
+  dateCancelButton: document.querySelector("#dateCancelButton"),
+  dateApplyButton: document.querySelector("#dateApplyButton"),
+  datePresetButtons: document.querySelectorAll("[data-date-preset]"),
+  dateFrom: document.querySelector("#dateFrom"),
+  dateTo: document.querySelector("#dateTo"),
+  dateNowButtons: document.querySelectorAll("[data-date-now]"),
   dateRangeLabel: document.querySelector("#dateRangeLabel"),
   summaryGrid: document.querySelector("#summaryGrid"),
   ontologyCount: document.querySelector("#ontologyCount"),
@@ -48,9 +51,18 @@ let latestEvents = [];
 let showAllTransactions = false;
 let showAllEvents = false;
 let drilldowns = new Map();
+let appliedDateRange;
 const autoRefreshIntervalMs = 5000;
 const previewRowLimit = 5;
 const dateSliderStart = new Date("2020-01-01T00:00:00.000Z");
+
+elements.themeToggle.checked = document.documentElement.dataset.theme === "dark";
+elements.themeToggle.addEventListener("change", () => {
+  document.documentElement.dataset.theme = elements.themeToggle.checked ? "dark" : "light";
+  try {
+    localStorage.setItem("sdo-theme", elements.themeToggle.checked ? "dark" : "light");
+  } catch {}
+});
 
 for (const element of [
   elements.refreshButton,
@@ -65,11 +77,28 @@ for (const element of [
   element.addEventListener("change", loadDashboard);
 }
 for (const element of dateInputs()) {
-  element.addEventListener("change", () => {
+  element.addEventListener("change", normalizeDateRangeControls);
+}
+for (const button of elements.datePresetButtons) {
+  button.addEventListener("click", () => setDatePreset(button.dataset.datePreset));
+}
+for (const button of elements.dateNowButtons) {
+  button.addEventListener("click", () => {
+    setDateControls(button.dataset.dateNow, new Date());
     normalizeDateRangeControls();
-    loadDashboard();
   });
 }
+elements.dateRangeSummary.addEventListener("click", (event) => {
+  event.preventDefault();
+  if (elements.dateRangeMenu.open) closeDateMenu(false);
+  else elements.dateRangeMenu.open = true;
+});
+elements.dateCancelButton.addEventListener("click", () => closeDateMenu(false));
+elements.dateApplyButton.addEventListener("click", () => {
+  appliedDateRange = selectedDateRange();
+  closeDateMenu(true);
+  loadDashboard();
+});
 elements.refreshButton.addEventListener("click", loadDashboard);
 elements.autoRefreshToggle.addEventListener("change", updateAutoRefresh);
 elements.filterToggleButton.addEventListener("click", toggleFilters);
@@ -81,6 +110,12 @@ elements.drilldownOverlay.addEventListener("click", (event) => {
 });
 document.addEventListener("keydown", (event) => {
   if (event.key === "Escape" && !elements.drilldownOverlay.hidden) closeDrilldown();
+  if (event.key === "Escape") closeDateMenu(false);
+});
+document.addEventListener("click", (event) => {
+  if (elements.dateRangeMenu.open && !elements.dateRangeMenu.contains(event.target)) {
+    closeDateMenu(false);
+  }
 });
 elements.transactionShowMoreButton.addEventListener("click", () => {
   showAllTransactions = !showAllTransactions;
@@ -111,7 +146,7 @@ async function loadDashboard() {
       versionValidationPage,
       fieldUsagePage
     ] = await Promise.all([
-      getJson(`/api/events?take=100${query}`),
+      getAllEvents(query),
       getJson(`/api/transactions?${query.slice(1)}`),
       getJson(`/api/report?${query.slice(1)}`),
       getJson("/api/participants"),
@@ -124,7 +159,7 @@ async function loadDashboard() {
     renderOntologyOptions(artefactOptions);
     renderSelectedOntology(artefactOptions);
     renderArtefactDimensionOptions(artefactOptions);
-    renderSummary(eventsPage, transactionsPage);
+    renderSummary(report, eventsPage, transactionsPage);
     renderParticipants(participantsPage.data);
     latestTransactions = transactionsPage.data;
     latestEvents = eventsPage.data;
@@ -215,7 +250,7 @@ function buildQuery() {
   }
   if (elements.deprecatedFilter.value) params.set("artefactDeprecated", elements.deprecatedFilter.value);
   if (elements.statusFilter.value) params.set("status", elements.statusFilter.value);
-  const dateRange = selectedDateRange();
+  const dateRange = appliedDateRange;
   params.set("from", dateRange.from.toISOString());
   params.set("to", dateRange.to.toISOString());
   const value = params.toString();
@@ -226,7 +261,7 @@ function participantAndDateQuery() {
   const params = new URLSearchParams();
   if (elements.participantFilter.value) params.set("participantId", elements.participantFilter.value);
   if (elements.deprecatedFilter.value) params.set("artefactDeprecated", elements.deprecatedFilter.value);
-  const dateRange = selectedDateRange();
+  const dateRange = appliedDateRange;
   params.set("from", dateRange.from.toISOString());
   params.set("to", dateRange.to.toISOString());
   const value = params.toString();
@@ -234,24 +269,22 @@ function participantAndDateQuery() {
 }
 
 function setupDateSlider() {
-  populateMonthSelect(elements.dateFromMonth);
-  populateMonthSelect(elements.dateToMonth);
   setDateControls("from", dateSliderStart);
   setDateControls("to", new Date());
   normalizeDateRangeControls();
+  appliedDateRange = selectedDateRange();
 }
 
 function selectedDateRange() {
   const from = dateFromControls("from");
   const to = dateFromControls("to");
-  to.setUTCHours(23, 59, 59, 999);
   return { from, to };
 }
 
 function normalizeDateRangeControls() {
-  const today = dateAtUtcMidnight(new Date());
-  let from = clampDate(dateFromControls("from"), dateSliderStart, today);
-  let to = clampDate(dateFromControls("to"), dateSliderStart, today);
+  const now = new Date();
+  let from = clampDate(dateFromControls("from"), dateSliderStart, now);
+  let to = clampDate(dateFromControls("to"), dateSliderStart, now);
   if (from > to) {
     to = new Date(from);
   }
@@ -260,44 +293,39 @@ function normalizeDateRangeControls() {
   elements.dateRangeLabel.textContent = `${formatDateOnly(from)} to ${formatDateOnly(to)}`;
 }
 
-function dateInputs() {
-  return [
-    elements.dateFromDay,
-    elements.dateFromMonth,
-    elements.dateFromYear,
-    elements.dateToDay,
-    elements.dateToMonth,
-    elements.dateToYear
-  ];
+function setDatePreset(value) {
+  const to = new Date();
+  const from = value === "all"
+    ? dateSliderStart
+    : new Date(to.getTime() - Number(value) * 3600000);
+  setDateControls("from", from);
+  setDateControls("to", to);
+  normalizeDateRangeControls();
 }
 
-function populateMonthSelect(select) {
-  select.innerHTML = Array.from({ length: 12 }, (_, index) => {
-    const date = new Date(Date.UTC(2020, index, 1));
-    const month = new Intl.DateTimeFormat(undefined, { month: "short" }).format(date);
-    return `<option value="${index + 1}">${month}</option>`;
-  }).join("");
+function closeDateMenu(apply) {
+  if (!apply && appliedDateRange) {
+    setDateControls("from", appliedDateRange.from);
+    setDateControls("to", appliedDateRange.to);
+    normalizeDateRangeControls();
+  }
+  elements.dateRangeMenu.open = false;
+}
+
+function dateInputs() {
+  return [elements.dateFrom, elements.dateTo];
 }
 
 function dateFromControls(prefix) {
-  const day = Number(elements[`date${capitalize(prefix)}Day`].value || 1);
-  const month = Number(elements[`date${capitalize(prefix)}Month`].value || 1);
-  const year = Number(elements[`date${capitalize(prefix)}Year`].value || 2020);
-  const maxDay = daysInMonth(year, month);
-  return new Date(Date.UTC(year, month - 1, Math.min(Math.max(day, 1), maxDay)));
+  const value = elements[`date${capitalize(prefix)}`].value;
+  return value ? new Date(value) : new Date(prefix === "from" ? dateSliderStart : Date.now());
 }
 
 function setDateControls(prefix, value) {
-  const date = dateAtUtcMidnight(value);
-  elements[`date${capitalize(prefix)}Day`].value = String(date.getUTCDate());
-  elements[`date${capitalize(prefix)}Month`].value = String(date.getUTCMonth() + 1);
-  elements[`date${capitalize(prefix)}Year`].value = String(date.getUTCFullYear());
-  elements[`date${capitalize(prefix)}Year`].max = String(new Date().getUTCFullYear());
-}
-
-function dateAtUtcMidnight(value) {
-  const date = new Date(value);
-  return new Date(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()));
+  const input = elements[`date${capitalize(prefix)}`];
+  input.value = localDateTimeValue(value);
+  input.min = localDateTimeValue(dateSliderStart);
+  input.max = localDateTimeValue(new Date());
 }
 
 function clampDate(date, min, max) {
@@ -306,8 +334,9 @@ function clampDate(date, min, max) {
   return date;
 }
 
-function daysInMonth(year, month) {
-  return new Date(Date.UTC(year, month, 0)).getUTCDate();
+function localDateTimeValue(value) {
+  const date = new Date(value);
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
 }
 
 function capitalize(value) {
@@ -335,15 +364,26 @@ async function getJson(url) {
   return response.json();
 }
 
-function renderSummary(eventsPage, transactionsPage) {
+async function getAllEvents(query) {
+  const data = [];
+  let total;
+  do {
+    const page = await getJson(`/api/events?take=500&skip=${data.length}${query}`);
+    data.push(...page.data);
+    total = page.total;
+    if (!page.data.length) break;
+  } while (data.length < total);
+  return { data, total };
+}
+
+function renderSummary(report, eventsPage, transactionsPage) {
   const events = eventsPage.data;
   const failures = events.filter((event) => event.status === "failure").length;
   const successes = events.filter((event) => event.status === "success").length;
-  const participants = new Set(events.map((event) => event.source?.participantId).filter(Boolean));
   const successRate = events.length ? successes / events.length : 0;
 
   elements.summaryGrid.innerHTML = [
-    summaryCard("Participants", participants.size),
+    summaryCard("Participants", report.participantCount),
     summaryCard("Transactions", transactionsPage.total),
     summaryCard("Recent events", eventsPage.total),
     summaryCard("Success rate", formatRate(successRate), failures ? `${failures} failures` : "no failures")
@@ -597,7 +637,7 @@ function semanticCoverageCard(metric, events) {
       </div>
       <div class="metric-story-body">
         <div class="visual-pane">
-          ${donut(value, "#2563eb", referencedId)}
+          ${donut(value, "#3369ff", referencedId)}
           <div class="legend-row">
             ${drilldownButton(referencedId, '<i class="legend-dot blue"></i>Referenced')}
             ${drilldownButton(missingId, '<i class="legend-dot neutral"></i>Missing')}
@@ -661,14 +701,10 @@ function versionAdoptionCard(metric, artefacts, events) {
         </div>
         <strong>${formatRate(boundedRate(metric?.metricValue ?? 0))}</strong>
       </div>
-      <div class="metric-story-body">
-        <div class="visual-pane">
-          <div class="version-bars">
-            ${versionRows.length ? versionRows.map((row) => horizontalBar(row.label, row.value, row.max, row.detail, "default", row.drilldownId)).join("") : emptyViz("No versioned artefacts observed.")}
-          </div>
-        </div>
-        ${miniTable(["Artefact", "Version", "Events"], versionRows.map((row) => ({ cells: [row.label, row.version, row.value], drilldownId: row.drilldownId })))}
-      </div>
+      ${miniTable(["Artefact", "Version", "Events", "Participants"], versionRows.map((row) => ({
+        cells: [row.label, row.version, row.value, row.participants],
+        drilldownId: row.drilldownId
+      })))}
     </article>
   `;
 }
@@ -686,7 +722,6 @@ function deprecatedUsageCard(metric, artefacts, events) {
         eventsForArtefact(events, artefact)
       )
     }));
-  const max = Math.max(...deprecated.map((artefact) => artefact.eventCount), 1);
   return `
     <article class="metric-story">
       <div class="viz-heading">
@@ -696,30 +731,15 @@ function deprecatedUsageCard(metric, artefacts, events) {
         </div>
         <strong>${formatRate(boundedRate(metric?.metricValue ?? 0))}</strong>
       </div>
-      <div class="metric-story-body">
-        <div class="visual-pane">
-          <div class="risk-bars">
-            ${deprecated.length ? deprecated.map((artefact) =>
-              horizontalBar(
-                `${label(artefact.type)}: ${artefact.reference}`,
-                artefact.eventCount,
-                max,
-                `${artefact.version ?? "unversioned"} / ${artefact.participantIds.length} participants`,
-                "danger",
-                artefact.drilldownId
-              )
-            ).join("") : emptyViz("No deprecated artefact usage in this window.")}
-          </div>
-        </div>
-        ${miniTable(["Deprecated artefact", "Version", "Last seen"], deprecated.map((artefact) => ({
-          cells: [
-            `${label(artefact.type)}: ${artefact.reference}`,
-            artefact.version ?? "unversioned",
-            formatDate(artefact.lastSeenAt)
-          ],
-          drilldownId: artefact.drilldownId
-        })))}
-      </div>
+      ${miniTable(["Deprecated artefact", "Version", "Participants", "Last used"], deprecated.map((artefact) => ({
+        cells: [
+          `${label(artefact.type)}: ${artefact.reference}`,
+          artefact.version ?? "unversioned",
+          artefact.participantIds.length,
+          formatDate(artefact.lastSeenAt)
+        ],
+        drilldownId: artefact.drilldownId
+      })))}
     </article>
   `;
 }
@@ -736,22 +756,14 @@ function validationErrorCard(metric, events) {
         </div>
         <strong>${formatRate(boundedRate(metric?.metricValue ?? 0))}</strong>
       </div>
-      <div class="metric-story-body">
-        <div class="visual-pane">
-          <div class="trend-chart">${validationTrendSvg(validationEvents)}</div>
-          <div class="category-bars">
-            ${categoryRows.length ? categoryRows.map((row) => horizontalBar(row.label, row.value, row.max, "failures", "warning", row.drilldownId)).join("") : emptyViz("No validation failures in this window.")}
-          </div>
-        </div>
-        ${miniTable(["Failure category", "Failures", "Share"], categoryRows.map((row) => ({
-          cells: [
-            row.label,
-            row.value,
-            formatRate(row.total ? row.value / row.total : 0)
-          ],
-          drilldownId: row.drilldownId
-        })))}
-      </div>
+      ${miniTable(["Failure category", "Failures", "Share"], categoryRows.map((row) => ({
+        cells: [
+          row.label,
+          row.value,
+          formatRate(row.total ? row.value / row.total : 0)
+        ],
+        drilldownId: row.drilldownId
+      })))}
     </article>
   `;
 }
@@ -760,20 +772,6 @@ function donut(value, color, drilldownId) {
   return `
     <button class="donut" type="button" data-drilldown="${drilldownId}" style="--value:${value * 100};--donut-color:${color}">
       <span>${formatRate(value)}</span>
-    </button>
-  `;
-}
-
-function horizontalBar(labelText, value, max, detail, tone = "default", drilldownId) {
-  const width = max > 0 ? Math.max(4, (value / max) * 100) : 0;
-  return `
-    <button class="hbar-row drilldown-row-button" type="button" data-drilldown="${drilldownId}">
-      <div class="hbar-label">
-        <span>${escapeText(labelText)}</span>
-        <small>${escapeText(detail)}</small>
-      </div>
-      <div class="hbar-track"><span class="${tone}" style="width:${width}%"></span></div>
-      <strong>${value}</strong>
     </button>
   `;
 }
@@ -787,7 +785,7 @@ function topVersionRows(artefacts, events) {
         label: `${label(artefact.type)}: ${artefact.reference}`,
         value: artefact.eventCount,
         version: artefact.version,
-        detail: `v${artefact.version} / ${artefact.participantIds.length} participants`,
+        participants: artefact.participantIds.length,
         drilldownId: addDrilldown(
           `${label(artefact.type)} ${artefact.reference} v${artefact.version}`,
           "Events using this artefact version.",
@@ -797,8 +795,7 @@ function topVersionRows(artefacts, events) {
     })
     .sort((a, b) => b.value - a.value)
     .slice(0, 6);
-  const max = Math.max(...rows.map((row) => row.value), 1);
-  return rows.map((row) => ({ ...row, max }));
+  return rows;
 }
 
 function topFailureCategoryRows(events) {
@@ -820,9 +817,8 @@ function topFailureCategoryRows(events) {
     }))
     .sort((a, b) => b.value - a.value)
     .slice(0, 4);
-  const max = Math.max(...rows.map((row) => row.value), 1);
   const total = rows.reduce((sum, row) => sum + row.value, 0);
-  return rows.map((row) => ({ ...row, max, total }));
+  return rows.map((row) => ({ ...row, total }));
 }
 
 function miniTable(headers, rows) {
@@ -918,52 +914,6 @@ function artefactList(event) {
   return (event.artefacts ?? [])
     .map((artefact) => `${label(artefact.type ?? "unknown")}: ${artefact.reference ?? "unknown"}${artefact.version ? ` v${artefact.version}` : ""}`)
     .join("; ");
-}
-
-function validationTrendSvg(events) {
-  const buckets = dailyFailureRates(events).slice(-8).map((bucket) => ({
-    ...bucket,
-    drilldownId: addDrilldown(
-      `Validation trend: ${bucket.label}`,
-      "Validation result events for this day.",
-      bucket.events
-    )
-  }));
-  if (!buckets.length) {
-    return emptyViz("No validation events available for trend.");
-  }
-  const width = 320;
-  const height = 96;
-  const points = buckets.map((bucket, index) => {
-    const x = buckets.length === 1 ? width / 2 : (index / (buckets.length - 1)) * width;
-    const y = height - boundedRate(bucket.rate) * height;
-    return `${x.toFixed(1)},${y.toFixed(1)}`;
-  }).join(" ");
-  return `
-    <svg viewBox="0 0 ${width} ${height}" role="img" aria-label="Validation error trend">
-      <polyline points="${points}" fill="none" stroke="#dc2626" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"></polyline>
-      ${buckets.map((bucket, index) => {
-        const x = buckets.length === 1 ? width / 2 : (index / (buckets.length - 1)) * width;
-        const y = height - boundedRate(bucket.rate) * height;
-        return `<circle class="trend-point" data-drilldown="${bucket.drilldownId}" cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="5" fill="#dc2626"><title>${escapeText(bucket.label)} ${formatRate(bucket.rate)}</title></circle>`;
-      }).join("")}
-    </svg>
-  `;
-}
-
-function dailyFailureRates(events) {
-  const buckets = new Map();
-  for (const event of events) {
-    const date = new Date(event.timestamp).toISOString().slice(0, 10);
-    const bucket = buckets.get(date) ?? { label: date, total: 0, failures: 0, events: [] };
-    bucket.total += 1;
-    bucket.failures += event.status === "failure" ? 1 : 0;
-    bucket.events.push(event);
-    buckets.set(date, bucket);
-  }
-  return [...buckets.values()]
-    .sort((a, b) => a.label.localeCompare(b.label))
-    .map((bucket) => ({ ...bucket, rate: bucket.total ? bucket.failures / bucket.total : 0 }));
 }
 
 function emptyViz(text) {

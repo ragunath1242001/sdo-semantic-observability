@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
-import { buildFieldUsage, buildVersionValidation } from "../src/semantic.js";
+import {
+  buildFieldUsage,
+  buildReport,
+  buildVersionValidation
+} from "../src/semantic.js";
 
 function event(overrides) {
   return {
@@ -75,4 +79,17 @@ test("aggregates only thresholded field-presence counts from multiple participan
   assert.equal(rows[0].usageRate, 0);
   assert.equal(rows[0].participantCount, 2);
   assert.equal(rows[1].usageRate, 0.5);
+});
+
+test("counts observed participants across the complete filtered history", () => {
+  const events = Array.from({ length: 140 }, (_, index) => event({
+    eventType: "catalog.dataset.observed",
+    source: { participantId: `participant-${index % 14}` }
+  }));
+
+  assert.equal(buildReport(events).participantCount, 14);
+  assert.equal(
+    buildReport(events, { participantId: "participant-3" }).participantCount,
+    1
+  );
 });
