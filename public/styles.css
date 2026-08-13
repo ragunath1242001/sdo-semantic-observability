@@ -398,7 +398,7 @@ select {
 }
 
 .summary-grid {
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .metric-story-list {
@@ -428,10 +428,6 @@ select {
 
 .summary-card:nth-child(3) {
   border-top-color: var(--good);
-}
-
-.summary-card:nth-child(4) {
-  border-top-color: var(--warn);
 }
 
 .summary-label {
@@ -901,36 +897,6 @@ th {
   color: var(--muted);
 }
 
-.selected-ontology {
-  padding: 1rem;
-}
-
-.ontology-empty {
-  color: var(--muted);
-  font-size: 0.9rem;
-}
-
-.ontology-detail-grid {
-  display: grid;
-  grid-template-columns: repeat(6, minmax(0, 1fr));
-  gap: 1rem;
-}
-
-.detail-label {
-  color: var(--muted);
-  font-size: 0.75rem;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
-.detail-value {
-  font-family: Sora, Manrope, sans-serif;
-  margin-top: 0.25rem;
-  overflow-wrap: anywhere;
-  font-size: 0.95rem;
-  font-weight: 800;
-}
-
 .drilldown-overlay {
   position: fixed;
   inset: 0;
@@ -995,8 +961,7 @@ th {
 
   .summary-grid,
   .metric-story-list,
-  .metric-columns,
-  .ontology-detail-grid {
+  .metric-columns {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1042,8 +1007,7 @@ th {
 
   .summary-grid,
   .metric-story-list,
-  .metric-columns,
-  .ontology-detail-grid {
+  .metric-columns {
     grid-template-columns: minmax(0, 1fr);
   }
 

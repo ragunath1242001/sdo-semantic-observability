@@ -66,12 +66,13 @@ test("aggregates only thresholded field-presence counts from multiple participan
       presentCount
     }
   });
-  const rows = buildFieldUsage([
+  const events = [
     summary("participant-a", "setu:employee.startDate", 0),
     summary("participant-b", "setu:employee.startDate", 0),
     summary("participant-a", "setu:employee.role", 2),
     summary("participant-b", "setu:employee.role", 3)
-  ]);
+  ];
+  const rows = buildFieldUsage(events);
 
   assert.equal(rows[0].fieldId, "setu:employee.startDate");
   assert.equal(rows[0].observationCount, 10);
@@ -79,6 +80,8 @@ test("aggregates only thresholded field-presence counts from multiple participan
   assert.equal(rows[0].usageRate, 0);
   assert.equal(rows[0].participantCount, 2);
   assert.equal(rows[1].usageRate, 0.5);
+  assert.equal(buildFieldUsage(events, { artefactVersion: "2.1" }).length, 2);
+  assert.equal(buildFieldUsage(events, { artefactVersion: "2.0" }).length, 0);
 });
 
 test("counts observed participants across the complete filtered history", () => {
@@ -91,5 +94,27 @@ test("counts observed participants across the complete filtered history", () => 
   assert.equal(
     buildReport(events, { participantId: "participant-3" }).participantCount,
     1
+  );
+});
+
+test("scopes evolution metrics to the selected artefact", () => {
+  const report = buildReport([
+    event({
+      artefacts: [
+        { type: "ontology", reference: "urn:demo:ontology", version: "2.0" },
+        { type: "schema", reference: "urn:demo:legacy-schema", version: "1.0", deprecated: true }
+      ]
+    })
+  ], {
+    artefactType: "ontology",
+    artefactReference: "urn:demo:ontology",
+    artefactVersion: "2.0"
+  });
+
+  const adoption = report.evolution.find((metric) => metric.metricName === "artefact_version_adoption_rate");
+  const deprecated = report.evolution.find((metric) => metric.metricName === "deprecated_artefact_usage_rate");
+  assert.deepEqual(
+    { count: adoption.count, adoption: adoption.metricValue, deprecated: deprecated.metricValue },
+    { count: 1, adoption: 1, deprecated: 0 }
   );
 });

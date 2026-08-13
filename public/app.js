@@ -24,8 +24,6 @@ const elements = {
   dateNowButtons: document.querySelectorAll("[data-date-now]"),
   dateRangeLabel: document.querySelector("#dateRangeLabel"),
   summaryGrid: document.querySelector("#summaryGrid"),
-  ontologyCount: document.querySelector("#ontologyCount"),
-  selectedOntology: document.querySelector("#selectedOntology"),
   participantCount: document.querySelector("#participantCount"),
   participantsBody: document.querySelector("#participantsBody"),
   visualizationGrid: document.querySelector("#visualizationGrid"),
@@ -142,7 +140,8 @@ async function loadDashboard() {
       transactionsPage,
       report,
       participantsPage,
-      artefactsPage,
+      artefactOptionsPage,
+      filteredArtefactsPage,
       versionValidationPage,
       fieldUsagePage
     ] = await Promise.all([
@@ -151,13 +150,13 @@ async function loadDashboard() {
       getJson(`/api/report?${query.slice(1)}`),
       getJson("/api/participants"),
       getJson(`/api/artefacts?${participantAndDateQuery().slice(1)}`),
+      getJson(`/api/artefacts?${query.slice(1)}`),
       getJson(`/api/version-validation?${query.slice(1)}`),
       getJson(`/api/field-usage?${query.slice(1)}`)
     ]);
 
-    artefactOptions = artefactsPage.data;
+    artefactOptions = artefactOptionsPage.data;
     renderOntologyOptions(artefactOptions);
-    renderSelectedOntology(artefactOptions);
     renderArtefactDimensionOptions(artefactOptions);
     renderSummary(report, eventsPage, transactionsPage);
     renderParticipants(participantsPage.data);
@@ -166,7 +165,7 @@ async function loadDashboard() {
     renderVisualizations(
       report,
       eventsPage.data,
-      artefactOptions,
+      filteredArtefactsPage.data,
       versionValidationPage.data,
       fieldUsagePage.data
     );
@@ -377,16 +376,10 @@ async function getAllEvents(query) {
 }
 
 function renderSummary(report, eventsPage, transactionsPage) {
-  const events = eventsPage.data;
-  const failures = events.filter((event) => event.status === "failure").length;
-  const successes = events.filter((event) => event.status === "success").length;
-  const successRate = events.length ? successes / events.length : 0;
-
   elements.summaryGrid.innerHTML = [
     summaryCard("Participants", report.participantCount),
     summaryCard("Transactions", transactionsPage.total),
-    summaryCard("Recent events", eventsPage.total),
-    summaryCard("Success rate", formatRate(successRate), failures ? `${failures} failures` : "no failures")
+    summaryCard("Recent events", eventsPage.total)
   ].join("");
 }
 
@@ -441,59 +434,6 @@ function preserveSelect(select, optionHtml) {
 
 function unique(values) {
   return [...new Set(values)].sort((a, b) => String(a).localeCompare(String(b)));
-}
-
-function renderSelectedOntology(artefacts) {
-  const selected = selectedArtefactFilter();
-  const ontologyArtefacts = artefacts.filter((artefact) => isOntologyArtefact(artefact.type));
-  elements.ontologyCount.textContent = `${ontologyArtefacts.length} available`;
-
-  if (!selected) {
-    elements.selectedOntology.innerHTML = `
-      <div class="ontology-empty">Select an ontology or semantic artefact to inspect its observed version and usage.</div>
-    `;
-    return;
-  }
-
-  const artefact = artefacts.find((candidate) =>
-    candidate.type === selected.type &&
-    candidate.reference === selected.reference &&
-    (candidate.version ?? "") === (selected.version ?? "")
-  );
-
-  if (!artefact) {
-    elements.selectedOntology.innerHTML = `<div class="ontology-empty">Selected artefact is not present in the current filter window.</div>`;
-    return;
-  }
-
-  elements.selectedOntology.innerHTML = `
-    <div class="ontology-detail-grid">
-      <div>
-        <div class="detail-label">Artefact</div>
-        <div class="detail-value">${escapeText(artefact.reference)}</div>
-      </div>
-      <div>
-        <div class="detail-label">Type</div>
-        <div class="detail-value">${escapeText(label(artefact.type))}</div>
-      </div>
-      <div>
-        <div class="detail-label">Version</div>
-        <div class="detail-value">${escapeText(artefact.version ?? "unversioned")}</div>
-      </div>
-      <div>
-        <div class="detail-label">Observed Events</div>
-        <div class="detail-value">${artefact.eventCount}</div>
-      </div>
-      <div>
-        <div class="detail-label">Participants</div>
-        <div class="detail-value">${artefact.participantIds.length}</div>
-      </div>
-      <div>
-        <div class="detail-label">Datasets</div>
-        <div class="detail-value">${artefact.datasetPseudonyms.length}</div>
-      </div>
-    </div>
-  `;
 }
 
 function renderTransactions(transactions) {
@@ -552,6 +492,7 @@ function renderVisualizations(report, events, artefacts, versionValidation, fiel
 }
 
 function versionValidationCard(rows) {
+  if (!rows.length) return emptyMetricCard("Validation Errors by Governed Version");
   const topRows = rows.slice(0, 8);
   return `
     <article class="metric-story">
@@ -580,6 +521,7 @@ function versionValidationCard(rows) {
 }
 
 function fieldUsageCard(rows) {
+  if (!rows.length) return emptyMetricCard("Governed Semantic Field Usage");
   const topRows = rows.slice(0, 12);
   const notObserved = rows.filter((row) => row.presentCount === 0).length;
   return `
@@ -618,8 +560,9 @@ function findMetric(report, metricName) {
 }
 
 function semanticCoverageCard(metric, events) {
-  const value = boundedRate(metric?.metricValue ?? 0);
   const adoptionEvents = events.filter((event) => event.dimensions?.includes("adoption"));
+  if (!adoptionEvents.length) return emptyMetricCard("Ontology Coverage");
+  const value = boundedRate(metric?.metricValue ?? 0);
   const referencedEvents = adoptionEvents.filter(hasOntologyReference);
   const missingEvents = adoptionEvents.filter((event) => !hasOntologyReference(event));
   const referenced = referencedEvents.length;
@@ -653,8 +596,9 @@ function semanticCoverageCard(metric, events) {
 }
 
 function schemaCoverageCard(metric, events) {
-  const value = boundedRate(metric?.metricValue ?? 0);
   const adoptionEvents = events.filter((event) => event.dimensions?.includes("adoption"));
+  if (!adoptionEvents.length) return emptyMetricCard("Schema Reference Coverage");
+  const value = boundedRate(metric?.metricValue ?? 0);
   const referencedEvents = adoptionEvents.filter(hasSchemaReference);
   const missingEvents = adoptionEvents.filter((event) => !hasSchemaReference(event));
   const referenced = referencedEvents.length;
@@ -691,6 +635,7 @@ function schemaCoverageCard(metric, events) {
 }
 
 function versionAdoptionCard(metric, artefacts, events) {
+  if (!metric?.count) return emptyMetricCard("Artefact Version Adoption");
   const versionRows = topVersionRows(artefacts, events);
   return `
     <article class="metric-story">
@@ -710,6 +655,7 @@ function versionAdoptionCard(metric, artefacts, events) {
 }
 
 function deprecatedUsageCard(metric, artefacts, events) {
+  if (!metric?.count) return emptyMetricCard("Deprecated Artefact Usage");
   const deprecated = artefacts
     .filter((artefact) => artefact.deprecated)
     .sort((a, b) => b.eventCount - a.eventCount)
@@ -746,6 +692,7 @@ function deprecatedUsageCard(metric, artefacts, events) {
 
 function validationErrorCard(metric, events) {
   const validationEvents = events.filter((event) => event.eventType === "metadata.validation.result");
+  if (!validationEvents.length) return emptyMetricCard("Semantic Validation Errors");
   const categoryRows = topFailureCategoryRows(validationEvents);
   return `
     <article class="metric-story">
@@ -920,6 +867,15 @@ function emptyViz(text) {
   return `<div class="viz-empty">${escapeText(text)}</div>`;
 }
 
+function emptyMetricCard(title) {
+  return `
+    <article class="metric-story">
+      <div class="viz-heading"><h2>${escapeText(title)}</h2></div>
+      ${emptyViz("No matching data in this window.")}
+    </article>
+  `;
+}
+
 function boundedRate(value) {
   return Math.min(1, Math.max(0, Number(value) || 0));
 }
@@ -943,12 +899,11 @@ function renderEvents(events) {
     : emptyRow(6, "No events recorded yet.");
 }
 
-function summaryCard(labelText, value, footer = "") {
+function summaryCard(labelText, value) {
   return `
     <article class="summary-card">
       <div class="summary-label">${labelText}</div>
       <div class="summary-value">${value}</div>
-      <div class="muted">${footer}</div>
     </article>
   `;
 }

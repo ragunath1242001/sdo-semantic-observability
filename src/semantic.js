@@ -34,7 +34,7 @@ export function buildReport(events, filter = {}) {
     ).size,
     adoption: adoptionMetrics(filtered, start, end),
     friction: frictionMetrics(filtered, start, end),
-    evolution: evolutionMetrics(filtered, start, end),
+    evolution: evolutionMetrics(filtered, start, end, filter),
     stability: stabilityMetrics(filtered, start, end)
   };
 }
@@ -54,6 +54,15 @@ export function filterEvents(events, filter = {}) {
     if (filter.datasetPseudonym && event.context?.datasetPseudonym !== filter.datasetPseudonym) return false;
     if (filter.participantPairPseudonym && event.context?.participantPairPseudonym !== filter.participantPairPseudonym) return false;
     if (filter.artefactReference || filter.artefactType || filter.artefactVersion || filter.artefactDeprecated) {
+      if (
+        filter.artefactVersion &&
+        !filter.artefactReference &&
+        !filter.artefactType &&
+        !filter.artefactDeprecated &&
+        scalarString(event.attributes?.governedVersion) === filter.artefactVersion
+      ) {
+        return true;
+      }
       return event.artefacts?.some((artefact) => {
         if (filter.artefactReference && artefact.reference !== filter.artefactReference) return false;
         if (filter.artefactType && artefact.type !== filter.artefactType) return false;
@@ -277,8 +286,10 @@ function frictionMetrics(events, start, end) {
   ];
 }
 
-function evolutionMetrics(events, start, end) {
-  const artefacts = events.flatMap((event) => event.artefacts ?? []);
+function evolutionMetrics(events, start, end, filter) {
+  const artefacts = events
+    .flatMap((event) => event.artefacts ?? [])
+    .filter((artefact) => artefactMatchesFilter(artefact, filter));
   const versioned = artefacts.filter((artefact) => artefact.version);
   const deprecated = artefacts.filter(isDeprecatedArtefact);
   return [
