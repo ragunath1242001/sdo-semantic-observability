@@ -181,6 +181,7 @@ GET  /api/health
 POST /api/participants/register
 GET  /api/participants
 GET  /api/participants/me
+PATCH /api/participants/me
 POST /api/ingest/events
 GET  /api/events
 GET  /api/events/stream
@@ -189,6 +190,7 @@ GET  /api/report
 GET  /api/transactions
 GET  /api/version-validation
 GET  /api/field-usage
+GET  /api/business-message-usage
 ```
 
 Supported query filters:
@@ -200,6 +202,7 @@ participantId
 component
 eventType
 status
+datasetCategory
 datasetPseudonym
 participantPairPseudonym
 artefactType
@@ -258,6 +261,11 @@ field-usage summaries. Counts remain local until the minimum observation
 threshold is reached. The central dashboard suppresses field usage until at
 least two participants contribute; configure a higher threshold with
 `SDO_FIELD_USAGE_MIN_PARTICIPANTS`.
+
+The controlled `setu-humanresource-payrate` demo uses a separate
+`business-message.usage.summary` event with aggregate counts only. Its fixture
+percentages are illustrative, not operational SETU statistics.
+Use the dashboard Scenario filter to isolate its end-to-end metric story.
 
 ## Participant-Side Export
 

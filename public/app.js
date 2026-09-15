@@ -7,6 +7,7 @@ const elements = {
   themeToggle: document.querySelector("#themeToggle"),
   autoRefreshToggle: document.querySelector("#autoRefreshToggle"),
   refreshStatus: document.querySelector("#refreshStatus"),
+  scenarioFilter: document.querySelector("#scenarioFilter"),
   participantFilter: document.querySelector("#participantFilter"),
   metricFilter: document.querySelector("#metricFilter"),
   ontologyFilter: document.querySelector("#ontologyFilter"),
@@ -46,6 +47,7 @@ let streamRefreshTimer;
 let artefactOptions = [];
 let latestTransactions = [];
 let latestEvents = [];
+let participantNames = new Map();
 let showAllTransactions = false;
 let showAllEvents = false;
 let drilldowns = new Map();
@@ -64,6 +66,7 @@ elements.themeToggle.addEventListener("change", () => {
 
 for (const element of [
   elements.refreshButton,
+  elements.scenarioFilter,
   elements.participantFilter,
   elements.metricFilter,
   elements.ontologyFilter,
@@ -125,6 +128,7 @@ elements.eventShowMoreButton.addEventListener("click", () => {
 });
 
 setupDateSlider();
+elements.scenarioFilter.value = new URLSearchParams(location.search).get("datasetCategory") ?? "";
 await loadDashboard();
 connectEventStream();
 updateAutoRefresh();
@@ -143,7 +147,8 @@ async function loadDashboard() {
       artefactOptionsPage,
       filteredArtefactsPage,
       versionValidationPage,
-      fieldUsagePage
+      fieldUsagePage,
+      businessMessageUsagePage
     ] = await Promise.all([
       getAllEvents(query),
       getJson(`/api/transactions?${query.slice(1)}`),
@@ -152,14 +157,19 @@ async function loadDashboard() {
       getJson(`/api/artefacts?${participantAndDateQuery().slice(1)}`),
       getJson(`/api/artefacts?${query.slice(1)}`),
       getJson(`/api/version-validation?${query.slice(1)}`),
-      getJson(`/api/field-usage?${query.slice(1)}`)
+      getJson(`/api/field-usage?${query.slice(1)}`),
+      getJson(`/api/business-message-usage?${query.slice(1)}`)
     ]);
 
     artefactOptions = artefactOptionsPage.data;
+    participantNames = new Map(participantsPage.data.map((participant) => [participant.participantId, participant.displayName]));
     renderOntologyOptions(artefactOptions);
     renderArtefactDimensionOptions(artefactOptions);
     renderSummary(report, eventsPage, transactionsPage);
-    renderParticipants(participantsPage.data);
+    const observedParticipantIds = new Set(eventsPage.data.map((event) => event.source?.participantId).filter(Boolean));
+    renderParticipants(elements.scenarioFilter.value
+      ? participantsPage.data.filter((participant) => observedParticipantIds.has(participant.participantId))
+      : participantsPage.data);
     latestTransactions = transactionsPage.data;
     latestEvents = eventsPage.data;
     renderVisualizations(
@@ -167,7 +177,8 @@ async function loadDashboard() {
       eventsPage.data,
       filteredArtefactsPage.data,
       versionValidationPage.data,
-      fieldUsagePage.data
+      fieldUsagePage.data,
+      businessMessageUsagePage.data
     );
     renderTransactions(transactionsPage.data);
     renderEvents(eventsPage.data);
@@ -185,15 +196,14 @@ function renderParticipants(participants) {
   elements.participantsBody.innerHTML = participants.length
     ? participants.map((participant) => `
       <tr>
-        <td>${escapeText(participant.participantId)}</td>
-        <td>${escapeText(participant.displayName ?? "")}</td>
+        <td>${escapeText(participant.displayName ?? "Registered participant")}</td>
         <td>${badge(participant.status)}</td>
         <td>${participant.eventCount ?? 0}</td>
         <td>${participant.failureCount ?? 0}</td>
         <td>${formatDate(participant.lastSeenAt ?? participant.latestEventAt)}</td>
       </tr>
     `).join("")
-    : emptyRow(6, "No participants registered yet.");
+    : emptyRow(5, "No participants registered yet.");
 }
 
 function updateAutoRefresh() {
@@ -237,6 +247,7 @@ function setRefreshStatus(message) {
 
 function buildQuery() {
   const params = new URLSearchParams();
+  if (elements.scenarioFilter.value) params.set("datasetCategory", elements.scenarioFilter.value);
   if (elements.participantFilter.value) params.set("participantId", elements.participantFilter.value);
   const selectedArtefact = selectedArtefactFilter();
   if (selectedArtefact) {
@@ -258,6 +269,7 @@ function buildQuery() {
 
 function participantAndDateQuery() {
   const params = new URLSearchParams();
+  if (elements.scenarioFilter.value) params.set("datasetCategory", elements.scenarioFilter.value);
   if (elements.participantFilter.value) params.set("participantId", elements.participantFilter.value);
   if (elements.deprecatedFilter.value) params.set("artefactDeprecated", elements.deprecatedFilter.value);
   const dateRange = appliedDateRange;
@@ -394,7 +406,7 @@ function renderOntologyOptions(artefacts) {
         version: artefact.version
       }));
       const version = artefact.version ? ` v${artefact.version}` : " unversioned";
-      return `<option value="${value}">${escapeText(label(artefact.type))}: ${escapeText(artefact.reference)}${escapeText(version)}</option>`;
+      return `<option value="${value}">${escapeText(label(artefact.type))}: ${escapeText(artefactName(artefact))}${escapeText(version)}</option>`;
     });
 
   elements.ontologyFilter.innerHTML = [
@@ -445,8 +457,8 @@ function renderTransactions(transactions) {
     ? visibleTransactions.map((transaction) => `
       <tr>
         <td>${badge(transaction.status)}</td>
-        <td>${escapeText(transaction.sourceParticipants.join(", ") || "unknown")}</td>
-        <td>${escapeText(transaction.datasetPseudonym ?? "")}</td>
+        <td>${escapeText(transaction.sourceParticipants.map(participantName).join(", ") || "unknown")}</td>
+        <td>${escapeText(transaction.datasetCategory ?? transaction.datasetPseudonym ?? "")}</td>
         <td>${transaction.eventCount}</td>
         <td>${escapeText(transaction.eventTypes.slice(0, 4).join(", "))}</td>
         <td>${formatDate(transaction.lastSeenAt)}</td>
@@ -455,7 +467,7 @@ function renderTransactions(transactions) {
     : emptyRow(6, "No transactions recorded yet.");
 }
 
-function renderVisualizations(report, events, artefacts, versionValidation, fieldUsage) {
+function renderVisualizations(report, events, artefacts, versionValidation, fieldUsage, businessMessageUsage) {
   drilldowns = new Map();
   const metricCards = [
     {
@@ -485,6 +497,10 @@ function renderVisualizations(report, events, artefacts, versionValidation, fiel
     {
       name: "semantic_field_usage",
       html: fieldUsageCard(fieldUsage)
+    },
+    {
+      name: "business_message_usage",
+      html: businessMessageUsageCard(businessMessageUsage)
     }
   ].filter((card) => !elements.metricFilter.value || card.name === elements.metricFilter.value);
 
@@ -531,7 +547,7 @@ function fieldUsageCard(rows) {
           <h2>Governed Semantic Field Usage</h2>
           <div class="muted">Thresholded presence counts only; no values or raw payloads.</div>
         </div>
-        <strong>${notObserved} not observed</strong>
+        <strong>${rows.some((row) => row.evidenceMode === "controlled-demo") ? "Controlled demo" : `${notObserved} not observed`}</strong>
       </div>
       ${miniTable(
         ["Standard", "Version", "Field", "Present / observed", "Usage", "Participants"],
@@ -542,6 +558,36 @@ function fieldUsageCard(rows) {
             row.fieldId,
             `${row.presentCount} / ${row.observationCount}`,
             formatRate(row.usageRate),
+            row.participantCount
+          ]
+        }))
+      )}
+    </article>
+  `;
+}
+
+function businessMessageUsageCard(rows) {
+  if (!rows.length) return emptyMetricCard("Business Message Usage");
+  return `
+    <article class="metric-story">
+      <div class="viz-heading">
+        <div>
+          <h2>Business Message Usage</h2>
+          <div class="muted">Controlled, privacy-safe summaries; no message bodies or field values.</div>
+        </div>
+        <strong>${rows[0].evidenceMode === "controlled-demo" ? "Controlled demo" : escapeText(rows[0].evidenceMode)}</strong>
+      </div>
+      ${miniTable(
+        ["Period", "Standard", "Version", "Version use", "Element", "Populated", "Change", "Participants"],
+        rows.slice(0, 8).map((row) => ({
+          cells: [
+            `${formatUtcDateOnly(row.timeWindowStart)} – ${formatUtcDateOnly(row.timeWindowEnd)}`,
+            row.governedStandardId,
+            row.version,
+            `${row.versionCount} / ${row.observationCount} (${formatRate(row.versionAdoptionRate)})`,
+            row.fieldId,
+            `${row.presentCount} / ${row.eligibleCount} (${formatRate(row.fieldPopulationRate)})`,
+            row.fieldPopulationDelta === null ? "Baseline" : `${row.fieldPopulationDelta >= 0 ? "+" : ""}${(row.fieldPopulationDelta * 100).toFixed(1)} pp`,
             row.participantCount
           ]
         }))
@@ -663,8 +709,8 @@ function deprecatedUsageCard(metric, artefacts, events) {
     .map((artefact) => ({
       ...artefact,
       drilldownId: addDrilldown(
-        `Deprecated: ${label(artefact.type)} ${artefact.reference}`,
-        `Events using ${artefact.reference} ${artefact.version ?? "unversioned"}.`,
+        `Deprecated: ${label(artefact.type)} ${artefactName(artefact)}`,
+        `Events using ${artefactName(artefact)} ${artefact.version ?? "unversioned"}.`,
         eventsForArtefact(events, artefact)
       )
     }));
@@ -679,7 +725,7 @@ function deprecatedUsageCard(metric, artefacts, events) {
       </div>
       ${miniTable(["Deprecated artefact", "Version", "Participants", "Last used"], deprecated.map((artefact) => ({
         cells: [
-          `${label(artefact.type)}: ${artefact.reference}`,
+          `${label(artefact.type)}: ${artefactName(artefact)}`,
           artefact.version ?? "unversioned",
           artefact.participantIds.length,
           formatDate(artefact.lastSeenAt)
@@ -729,12 +775,12 @@ function topVersionRows(artefacts, events) {
     .map((artefact) => {
       const rowEvents = eventsForArtefact(events, artefact);
       return {
-        label: `${label(artefact.type)}: ${artefact.reference}`,
+        label: `${label(artefact.type)}: ${artefactName(artefact)}`,
         value: artefact.eventCount,
         version: artefact.version,
         participants: artefact.participantIds.length,
         drilldownId: addDrilldown(
-          `${label(artefact.type)} ${artefact.reference} v${artefact.version}`,
+          `${label(artefact.type)} ${artefactName(artefact)} v${artefact.version}`,
           "Events using this artefact version.",
           rowEvents
         )
@@ -814,10 +860,10 @@ function openDrilldown(drilldown) {
     ? drilldown.events.map((event) => `
       <tr>
         <td>${formatDate(event.timestamp)}</td>
-        <td>${escapeText(event.source?.participantId ?? "unknown")}</td>
+        <td>${escapeText(participantName(event.source?.participantId))}</td>
         <td>${badge(event.status)}</td>
         <td>${escapeText(event.eventType)}</td>
-        <td>${escapeText(event.context?.datasetPseudonym ?? "")}</td>
+        <td>${escapeText(event.context?.datasetCategory ?? event.context?.datasetPseudonym ?? "")}</td>
         <td>${escapeText(transactionLabel(event))}</td>
         <td>${escapeText(artefactList(event))}</td>
       </tr>
@@ -849,7 +895,8 @@ function hasSchemaReference(event) {
 }
 
 function transactionLabel(event) {
-  return event.context?.correlationId ??
+  return event.context?.datasetCategory ??
+    event.context?.correlationId ??
     event.context?.transferId ??
     event.context?.agreementId ??
     event.context?.negotiationId ??
@@ -859,8 +906,12 @@ function transactionLabel(event) {
 
 function artefactList(event) {
   return (event.artefacts ?? [])
-    .map((artefact) => `${label(artefact.type ?? "unknown")}: ${artefact.reference ?? "unknown"}${artefact.version ? ` v${artefact.version}` : ""}`)
+    .map((artefact) => `${label(artefact.type ?? "unknown")}: ${artefactName(artefact)}${artefact.version ? ` v${artefact.version}` : ""}`)
     .join("; ");
+}
+
+function artefactName(artefact) {
+  return artefact.displayName ?? artefact.reference ?? "unknown";
 }
 
 function emptyViz(text) {
@@ -889,10 +940,10 @@ function renderEvents(events) {
     ? visibleEvents.map((event) => `
       <tr>
         <td>${formatDate(event.timestamp)}</td>
-        <td>${escapeText(event.source?.participantId ?? "unknown")}</td>
+        <td>${escapeText(participantName(event.source?.participantId))}</td>
         <td>${escapeText(event.eventType)}</td>
         <td>${badge(event.status)}</td>
-        <td>${escapeText(event.context?.datasetPseudonym ?? "")}</td>
+        <td>${escapeText(event.context?.datasetCategory ?? event.context?.datasetPseudonym ?? "")}</td>
         <td>${escapeText(event.failureCategory ?? "")}</td>
       </tr>
     `).join("")
@@ -906,6 +957,10 @@ function summaryCard(labelText, value) {
       <div class="summary-value">${value}</div>
     </article>
   `;
+}
+
+function participantName(participantId) {
+  return participantNames.get(participantId) ?? "Registered participant";
 }
 
 function badge(status) {
@@ -950,6 +1005,10 @@ function formatDateOnly(value) {
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium"
   }).format(value);
+}
+
+function formatUtcDateOnly(value) {
+  return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeZone: "UTC" }).format(new Date(value));
 }
 
 function formatTime(value) {

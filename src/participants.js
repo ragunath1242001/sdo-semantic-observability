@@ -39,6 +39,13 @@ export function publicParticipant(participant, eventSummary) {
   };
 }
 
+export function renameParticipant(participant, input) {
+  if (typeof input?.displayName !== "string") return undefined;
+  const displayName = input.displayName.trim();
+  if (!displayName || displayName.length > 200) return undefined;
+  return { ...participant, displayName };
+}
+
 export function summarizeParticipantEvents(events) {
   const summaries = new Map();
   for (const event of events) {

@@ -54,6 +54,13 @@
         </div>
         <div class="filters-body">
           <label>
+            Scenario
+            <select id="scenarioFilter">
+              <option value="">All scenarios</option>
+              <option value="SETU HumanResource end-to-end demo">SETU HumanResource / PayRate</option>
+            </select>
+          </label>
+          <label>
             Participant
             <input id="participantFilter" placeholder="participant id" />
           </label>
@@ -68,6 +75,7 @@
               <option value="validation_error_rate">Semantic validation error rate</option>
               <option value="version_validation_errors">Validation errors by governed version</option>
               <option value="semantic_field_usage">Governed semantic field usage</option>
+              <option value="business_message_usage">Business message usage</option>
             </select>
           </label>
           <label>
@@ -163,7 +171,6 @@
             <thead>
               <tr>
                 <th>Participant</th>
-                <th>Display name</th>
                 <th>Status</th>
                 <th>Events</th>
                 <th>Failures</th>

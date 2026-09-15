@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { renameParticipant } from "../src/participants.js";
+
 import {
+  buildArtefacts,
+  buildBusinessMessageUsage,
   buildFieldUsage,
   buildReport,
   buildVersionValidation
@@ -18,6 +22,32 @@ function event(overrides) {
     ...overrides
   };
 }
+
+test("renames a participant without changing its identity", () => {
+  const participant = { participantId: "participant-a", displayName: "Alfa", status: "active" };
+  assert.deepEqual(
+    renameParticipant(participant, { displayName: "  AsterFlex Staffing B.V. - SETU staffing supplier  " }),
+    { ...participant, displayName: "AsterFlex Staffing B.V. - SETU staffing supplier" }
+  );
+  assert.equal(renameParticipant(participant, { displayName: " " }), undefined);
+});
+
+test("keeps controlled public artefact labels and lifecycle status", () => {
+  const rows = buildArtefacts([event({
+    eventType: "catalog.dataset.observed",
+    artefacts: [{
+      type: "schema",
+      reference: "p_public_setu_humanresource_v1_4_schema",
+      displayName: "SETU HumanResource XML Schema (legacy)",
+      version: "1.4",
+      deprecated: true,
+      lifecycleStatus: "deprecated"
+    }]
+  })]);
+
+  assert.equal(rows[0].displayName, "SETU HumanResource XML Schema (legacy)");
+  assert.equal(rows[0].deprecated, true);
+});
 
 test("correlates validation failures with governed versions without claiming causation", () => {
   const events = [
@@ -82,6 +112,57 @@ test("aggregates only thresholded field-presence counts from multiple participan
   assert.equal(rows[1].usageRate, 0.5);
   assert.equal(buildFieldUsage(events, { artefactVersion: "2.1" }).length, 2);
   assert.equal(buildFieldUsage(events, { artefactVersion: "2.0" }).length, 0);
+});
+
+test("compares controlled SETU HumanResource usage without exposing message values", () => {
+  const summary = (participantId, start, end, observationCount, versionCount, presentCount) => event({
+    timestamp: end,
+    eventType: "business-message.usage.summary",
+    source: { participantId },
+    attributes: {
+      scope: "business-message",
+      evidenceMode: "controlled-demo",
+      governedStandardId: "SETU HumanResource",
+      governedVersion: "2.0.1",
+      fieldId: "HumanResource / pay rates",
+      timeWindowStart: start,
+      timeWindowEnd: end,
+      observationCount,
+      versionCount,
+      eligibleCount: versionCount,
+      presentCount
+    }
+  });
+  const events = [
+    summary("participant-a", "2025-04-01T00:00:00.000Z", "2025-06-30T23:59:59.000Z", 50, 30, 13),
+    summary("participant-b", "2025-04-01T00:00:00.000Z", "2025-06-30T23:59:59.000Z", 50, 30, 14),
+    summary("participant-a", "2026-04-01T00:00:00.000Z", "2026-06-30T23:59:59.000Z", 50, 36, 11),
+    summary("participant-b", "2026-04-01T00:00:00.000Z", "2026-06-30T23:59:59.000Z", 50, 37, 12)
+  ];
+
+  const rows = buildBusinessMessageUsage(events);
+  assert.equal(rows.length, 2);
+  assert.deepEqual(
+    {
+      observations: rows[0].observationCount,
+      versions: rows[0].versionCount,
+      adoption: rows[0].versionAdoptionRate,
+      present: rows[0].presentCount,
+      population: rows[0].fieldPopulationRate,
+      populationDelta: rows[0].fieldPopulationDelta,
+      participants: rows[0].participantCount
+    },
+    {
+      observations: 100,
+      versions: 73,
+      adoption: 0.73,
+      present: 23,
+      population: 23 / 73,
+      populationDelta: (23 / 73) - 0.45,
+      participants: 2
+    }
+  );
+  assert.equal(buildBusinessMessageUsage(events.slice(0, 1)).length, 0);
 });
 
 test("counts observed participants across the complete filtered history", () => {

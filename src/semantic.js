@@ -51,6 +51,7 @@ export function filterEvents(events, filter = {}) {
     if (filter.component && event.component !== filter.component) return false;
     if (filter.eventType && event.eventType !== filter.eventType) return false;
     if (filter.status && event.status !== filter.status) return false;
+    if (filter.datasetCategory && event.context?.datasetCategory !== filter.datasetCategory) return false;
     if (filter.datasetPseudonym && event.context?.datasetPseudonym !== filter.datasetPseudonym) return false;
     if (filter.participantPairPseudonym && event.context?.participantPairPseudonym !== filter.participantPairPseudonym) return false;
     if (filter.artefactReference || filter.artefactType || filter.artefactVersion || filter.artefactDeprecated) {
@@ -85,6 +86,7 @@ export function buildArtefacts(events, filter = {}) {
       const current = artefacts.get(key) ?? {
         type: artefact.type ?? "unknown",
         reference: artefact.reference ?? "unknown",
+        displayName: scalarString(artefact.displayName),
         version: artefact.version,
         deprecated: isDeprecatedArtefact(artefact),
         eventCount: 0,
@@ -95,6 +97,7 @@ export function buildArtefacts(events, filter = {}) {
       };
 
       current.eventCount += 1;
+      current.displayName ??= scalarString(artefact.displayName);
       current.firstSeenAt = minIso(current.firstSeenAt, event.timestamp);
       current.lastSeenAt = maxIso(current.lastSeenAt, event.timestamp);
       if (event.source?.participantId) current.participantIds.add(event.source.participantId);
@@ -123,6 +126,7 @@ export function buildTransactions(events, filter = {}) {
       sourceParticipants: new Set(),
       participantPairPseudonym: event.context?.participantPairPseudonym,
       datasetPseudonym: event.context?.datasetPseudonym,
+      datasetCategory: event.context?.datasetCategory,
       status: "info",
       eventCount: 0,
       failureCount: 0,
@@ -134,6 +138,7 @@ export function buildTransactions(events, filter = {}) {
 
     current.firstSeenAt = minIso(current.firstSeenAt, event.timestamp);
     current.lastSeenAt = maxIso(current.lastSeenAt, event.timestamp);
+    current.datasetCategory ??= event.context?.datasetCategory;
     current.eventCount += 1;
     current.failureCount += event.status === "failure" ? 1 : 0;
     current.warningCount += event.status === "warning" ? 1 : 0;
@@ -216,14 +221,18 @@ export function buildFieldUsage(events, filter = {}, minimumParticipants = 2) {
     const standardId = scalarString(event.attributes?.governedStandardId);
     const version = scalarString(event.attributes?.governedVersion);
     const fieldId = scalarString(event.attributes?.fieldId);
+    const scope = scalarString(event.attributes?.scope);
+    const evidenceMode = scalarString(event.attributes?.evidenceMode);
     const observationCount = finiteCount(event.attributes?.observationCount);
     const presentCount = finiteCount(event.attributes?.presentCount);
     if (!standardId || !version || !fieldId || observationCount < 2 || presentCount > observationCount) {
       continue;
     }
 
-    const key = `${standardId}|${version}|${fieldId}`;
+    const key = `${scope ?? ""}|${evidenceMode ?? ""}|${standardId}|${version}|${fieldId}`;
     const current = fields.get(key) ?? {
+      scope,
+      evidenceMode,
       governedStandardId: standardId,
       version,
       fieldId,
@@ -246,6 +255,8 @@ export function buildFieldUsage(events, filter = {}, minimumParticipants = 2) {
   return [...fields.values()]
     .filter((entry) => entry.participantIds.size >= minimumParticipants)
     .map((entry) => ({
+      scope: entry.scope,
+      evidenceMode: entry.evidenceMode,
       governedStandardId: entry.governedStandardId,
       version: entry.version,
       fieldId: entry.fieldId,
@@ -257,6 +268,79 @@ export function buildFieldUsage(events, filter = {}, minimumParticipants = 2) {
       timeWindowEnd: entry.timeWindowEnd
     }))
     .sort((a, b) => a.usageRate - b.usageRate || b.observationCount - a.observationCount);
+}
+
+export function buildBusinessMessageUsage(events, filter = {}, minimumParticipants = 2) {
+  const summaries = new Map();
+  for (const event of filterEvents(events, filter)) {
+    if (event.eventType !== "business-message.usage.summary") continue;
+
+    const attributes = event.attributes ?? {};
+    const scope = scalarString(attributes.scope);
+    const evidenceMode = scalarString(attributes.evidenceMode);
+    const standardId = scalarString(attributes.governedStandardId);
+    const version = scalarString(attributes.governedVersion);
+    const fieldId = scalarString(attributes.fieldId);
+    const timeWindowStart = scalarString(attributes.timeWindowStart);
+    const timeWindowEnd = scalarString(attributes.timeWindowEnd);
+    const observationCount = finiteCount(attributes.observationCount);
+    const versionCount = finiteCount(attributes.versionCount);
+    const eligibleCount = finiteCount(attributes.eligibleCount);
+    const presentCount = finiteCount(attributes.presentCount);
+    if (scope !== "business-message" || !evidenceMode || !standardId || !version || !fieldId ||
+        !timeWindowStart || !timeWindowEnd || observationCount < 2 ||
+        versionCount > observationCount || eligibleCount > versionCount || presentCount > eligibleCount) {
+      continue;
+    }
+
+    const key = [scope, evidenceMode, standardId, version, fieldId, timeWindowStart, timeWindowEnd].join("|");
+    const current = summaries.get(key) ?? {
+      scope,
+      evidenceMode,
+      governedStandardId: standardId,
+      version,
+      fieldId,
+      timeWindowStart,
+      timeWindowEnd,
+      observationCount: 0,
+      versionCount: 0,
+      eligibleCount: 0,
+      presentCount: 0,
+      participantIds: new Set()
+    };
+    current.observationCount += observationCount;
+    current.versionCount += versionCount;
+    current.eligibleCount += eligibleCount;
+    current.presentCount += presentCount;
+    if (event.source?.participantId) current.participantIds.add(event.source.participantId);
+    summaries.set(key, current);
+  }
+
+  const rows = [...summaries.values()]
+    .filter((entry) => entry.participantIds.size >= minimumParticipants)
+    .map((entry) => ({
+      ...entry,
+      participantIds: undefined,
+      versionAdoptionRate: rate(entry.versionCount, entry.observationCount),
+      fieldPopulationRate: rate(entry.presentCount, entry.eligibleCount),
+      participantCount: entry.participantIds.size,
+      versionAdoptionDelta: null,
+      fieldPopulationDelta: null
+    }))
+    .sort((a, b) => a.timeWindowStart.localeCompare(b.timeWindowStart));
+
+  const previousBySeries = new Map();
+  for (const row of rows) {
+    const series = [row.scope, row.evidenceMode, row.governedStandardId, row.version, row.fieldId].join("|");
+    const previous = previousBySeries.get(series);
+    if (previous) {
+      row.versionAdoptionDelta = row.versionAdoptionRate - previous.versionAdoptionRate;
+      row.fieldPopulationDelta = row.fieldPopulationRate - previous.fieldPopulationRate;
+    }
+    previousBySeries.set(series, row);
+  }
+
+  return rows.sort((a, b) => b.timeWindowStart.localeCompare(a.timeWindowStart));
 }
 
 function adoptionMetrics(events, start, end) {

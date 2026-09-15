@@ -7,10 +7,12 @@ import {
   apiKeyMatches,
   createParticipantRegistration,
   publicParticipant,
+  renameParticipant,
   summarizeParticipantEvents
 } from "./participants.js";
 import {
   buildArtefacts,
+  buildBusinessMessageUsage,
   buildFieldUsage,
   buildReport,
   buildTransactions,
@@ -82,6 +84,14 @@ const server = createServer(async (request, response) => {
       );
     }
 
+    if (request.method === "PATCH" && url.pathname === "/api/participants/me") {
+      const participant = await requireParticipant(request);
+      const updated = renameParticipant(participant, await readJson(request));
+      if (!updated) throw httpError(400, "displayName must be between 1 and 200 characters");
+      await participantStore.update(updated);
+      return json(response, 200, publicParticipant(updated));
+    }
+
     if (request.method === "POST" && url.pathname === "/api/ingest/events") {
       const participant = await requireParticipant(request);
       const body = await readJson(request);
@@ -148,6 +158,16 @@ const server = createServer(async (request, response) => {
       return json(response, 200, { data, total: data.length });
     }
 
+    if (request.method === "GET" && url.pathname === "/api/business-message-usage") {
+      const events = await store.readAll();
+      const data = buildBusinessMessageUsage(
+        events,
+        queryFilter(url),
+        fieldUsageMinimumParticipants
+      );
+      return json(response, 200, { data, total: data.length });
+    }
+
     if (request.method === "GET") {
       return serveStatic(url.pathname, response);
     }
@@ -198,7 +218,10 @@ function normalizeIngestedEvents(body, participant) {
       artefacts: event.artefacts?.map((artefact) => ({
         type: artefact.type,
         reference: artefact.reference,
-        version: artefact.version
+        version: artefact.version,
+        displayName: artefact.displayName,
+        deprecated: artefact.deprecated,
+        lifecycleStatus: artefact.lifecycleStatus
       })),
       failureCategory: event.failureCategory,
       durationMs: event.durationMs,
@@ -242,7 +265,11 @@ function validateIngestedEvent(event) {
       if (!isObject(artefact) || !boundedString(artefact.type, 64) ||
           !boundedString(artefact.reference, 512) ||
           !artefact.reference.startsWith("p_") ||
-          (artefact.version !== undefined && !boundedString(artefact.version, 64))) {
+          (artefact.version !== undefined && !boundedString(artefact.version, 64)) ||
+          (artefact.displayName !== undefined &&
+            (event.attributes?.evidenceMode !== "controlled-demo" || !boundedString(artefact.displayName, 128))) ||
+          (artefact.deprecated !== undefined && typeof artefact.deprecated !== "boolean") ||
+          (artefact.lifecycleStatus !== undefined && !["active", "deprecated"].includes(artefact.lifecycleStatus))) {
         throw httpError(400, "Each artefact requires a type and pseudonymized reference");
       }
     });
@@ -270,6 +297,9 @@ function validateIngestedEvent(event) {
   if (event.eventType === "semantic-field.usage.summary") {
     validateFieldUsageSummary(event.attributes);
   }
+  if (event.eventType === "business-message.usage.summary") {
+    validateBusinessMessageUsageSummary(event.attributes);
+  }
 }
 
 const allowedContextKeys = new Set([
@@ -293,6 +323,7 @@ const allowedAttributeKeys = new Set([
   "datasetType",
   "validateExtraProps",
   "versionCount",
+  "eligibleCount",
   "currentVersion",
   "mediaType",
   "version",
@@ -308,6 +339,7 @@ const allowedAttributeKeys = new Set([
   "decision",
   "role",
   "scope",
+  "evidenceMode",
   "state",
   "direction",
   "format",
@@ -350,6 +382,33 @@ function validateFieldUsageSummary(attributes) {
   }
 }
 
+function validateBusinessMessageUsageSummary(attributes) {
+  if (!isObject(attributes) ||
+      attributes.scope !== "business-message" ||
+      attributes.evidenceMode !== "controlled-demo" ||
+      !boundedString(attributes.governedStandardId, 512) ||
+      !boundedString(attributes.governedVersion, 64) ||
+      !boundedString(attributes.fieldId, 512) ||
+      !boundedString(attributes.timeWindowStart, 64) ||
+      !Number.isFinite(Date.parse(attributes.timeWindowStart)) ||
+      !boundedString(attributes.timeWindowEnd, 64) ||
+      !Number.isFinite(Date.parse(attributes.timeWindowEnd)) ||
+      Date.parse(attributes.timeWindowEnd) < Date.parse(attributes.timeWindowStart) ||
+      !Number.isInteger(attributes.observationCount) ||
+      attributes.observationCount < 2 ||
+      !Number.isInteger(attributes.versionCount) ||
+      attributes.versionCount < 0 ||
+      attributes.versionCount > attributes.observationCount ||
+      !Number.isInteger(attributes.eligibleCount) ||
+      attributes.eligibleCount < 0 ||
+      attributes.eligibleCount > attributes.versionCount ||
+      !Number.isInteger(attributes.presentCount) ||
+      attributes.presentCount < 0 ||
+      attributes.presentCount > attributes.eligibleCount) {
+    throw httpError(400, "Invalid privacy-safe business message usage summary");
+  }
+}
+
 function validateObjectValues(value, name, maxEntries, maxLength) {
   if (!isObject(value) || Object.keys(value).length > maxEntries) {
     throw httpError(400, `${name} must be a bounded object`);
@@ -378,6 +437,7 @@ function queryFilter(url) {
     "component",
     "eventType",
     "status",
+    "datasetCategory",
     "datasetPseudonym",
     "participantPairPseudonym",
     "artefactType",
