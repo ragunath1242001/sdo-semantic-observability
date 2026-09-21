@@ -62,10 +62,7 @@ const metricExplanations = {
   "Schema Reference Coverage": "The share of adoption observations containing a schema or OpenAPI reference. “Missing” means no reference was observed in that event, not that no schema exists.",
   "Artefact Version Adoption": "The share of observed semantic artefact references that include a version. It reports observed metadata, not conformance with that version.",
   "Deprecated Artefact Usage": "The share of observed artefact references marked deprecated, obsolete, or legacy by their metadata or controlled identifier.",
-  "Semantic Validation Errors": "The failed share of metadata validation-result events. It does not include every technical message failure.",
-  "Observed Failure Causes": "Groups failed TSG events into coarse diagnostic categories. These categories are not confirmed technical root causes.",
-  "Validation Errors by Governed Version": "Groups metadata validation results by declared standard and version. The association does not prove that a version caused a failure.",
-  "Governed Semantic Field Usage": "Shows privacy-thresholded aggregate field-presence counts. It contains no field values or raw payloads.",
+  "Failure Analysis": "Combines failed TSG events, metadata validation errors, diagnostic categories, and governed-version associations. Categories are signals, not confirmed technical root causes.",
   "Business Message Usage": "Compares privacy-safe aggregate message counts, declared-version use, and element population. No message bodies or field values are exported."
 };
 
@@ -521,24 +518,12 @@ function renderVisualizations(report, events, artefacts, versionValidation, fail
       html: deprecatedUsageCard(findMetric(report, "deprecated_artefact_usage_rate"), artefacts, events)
     },
     {
-      name: "validation_error_rate",
-      html: validationErrorCard(findMetric(report, "validation_error_rate"), events)
-    },
-    {
-      name: "failure_causes",
-      html: failureCausesCard(failureCauses)
-    },
-    {
-      name: "version_validation_errors",
-      html: versionValidationCard(versionValidation)
-    },
-    {
-      name: "semantic_field_usage",
-      html: fieldUsageCard(fieldUsage)
+      name: "failure_analysis",
+      html: failureAnalysisCard(findMetric(report, "validation_error_rate"), failureCauses, versionValidation, events)
     },
     {
       name: "business_message_usage",
-      html: businessMessageUsageCard(businessMessageUsage)
+      html: businessMessageUsageCard(businessMessageUsage, fieldUsage)
     }
   ].filter((card) => !elements.metricFilter.value || card.name === elements.metricFilter.value);
 
@@ -548,85 +533,58 @@ function renderVisualizations(report, events, artefacts, versionValidation, fail
   }
 }
 
-function versionValidationCard(rows) {
-  if (!rows.length) return emptyMetricCard("Validation Errors by Governed Version");
-  const topRows = rows.slice(0, 8);
+function failureAnalysisCard(metric, causeRows, versionRows, events) {
+  const validationEvents = events.filter((event) => event.eventType === "metadata.validation.result");
+  if (!causeRows.length && !versionRows.length && !validationEvents.length) return emptyMetricCard("Failure Analysis");
+  const validationFailures = validationEvents.filter((event) => event.status === "failure").length;
+  const associatedFailures = versionRows.reduce((total, row) => total + row.failureCount, 0);
+  const unassociatedFailures = Math.max(0, validationFailures - associatedFailures);
+  const categoryRows = topFailureCategoryRows(validationEvents);
+  const governedRows = versionRows.slice(0, 8).map((row) => ({ cells: [
+    row.governedStandardId,
+    row.version,
+    row.validationCount,
+    row.failureCount,
+    formatRate(row.errorRate)
+  ] }));
+  if (unassociatedFailures) governedRows.push({ cells: ["Unassociated", "—", "—", unassociatedFailures, "—"] });
   return `
     <article class="metric-story">
       ${metricHeading(
-        "Validation Errors by Governed Version",
-        "Groups metadata validation results by declared standard and version. It shows association only and does not prove that a version caused a failure.",
-        `${rows.reduce((total, row) => total + row.failureCount, 0)} failures`
+        "Failure Analysis",
+        "Combines failed TSG events, metadata validation errors, diagnostic categories, and governed-version associations. Categories are signals, not confirmed technical root causes, and version association does not prove causation.",
+        `${causeRows.reduce((total, row) => total + row.failureCount, 0)} failures`
       )}
-      ${miniTable(
-        ["Standard", "Version", "Validations", "Failures", "Error rate", "Share of failures"],
-        topRows.map((row) => ({
-          cells: [
-            row.governedStandardId,
-            row.version,
-            row.validationCount,
-            row.failureCount,
-            formatRate(row.errorRate),
-            formatRate(row.failureShare)
-          ]
-        }))
-      )}
-    </article>
-  `;
-}
-
-function failureCausesCard(rows) {
-  if (!rows.length) return emptyMetricCard("Observed Failure Causes");
-  return `
-    <article class="metric-story">
-      ${metricHeading(
-        "Observed Failure Causes",
-        "Groups failed TSG events using their event type and reported failure category. These are coarse diagnostic signals, not confirmed technical root causes.",
-        `${rows.reduce((total, row) => total + row.failureCount, 0)} failures`
-      )}
+      <h3 class="metric-section-title">Overview</h3>
+      ${miniTable(["Validation observations", "Validation failures", "Error rate"], [{ cells: [
+        metric?.count ?? validationEvents.length,
+        validationFailures,
+        formatRate(boundedRate(metric?.metricValue ?? 0))
+      ] }])}
+      <h3 class="metric-section-title">Cause groups</h3>
       ${miniTable(
         ["Cause group", "Failures", "Share", "Observed labels"],
-        rows.map((row) => ({ cells: [
+        causeRows.map((row) => ({ cells: [
           row.category,
           row.failureCount,
           formatRate(row.failureShare),
           row.observedCategories.map(label).join(", ") || "Not classified"
         ] }))
       )}
+      <h3 class="metric-section-title">Validation categories</h3>
+      ${miniTable(["Validation category", "Failures", "Share"], categoryRows.map((row) => ({
+        cells: [row.label, row.value, formatRate(row.total ? row.value / row.total : 0)],
+        drilldownId: row.drilldownId
+      })))}
+      <h3 class="metric-section-title">Governed versions</h3>
+      ${miniTable(["Standard", "Version", "Validations", "Failures", "Error rate"], governedRows)}
     </article>
   `;
 }
 
-function fieldUsageCard(rows) {
-  if (!rows.length) return emptyMetricCard("Governed Semantic Field Usage");
-  const topRows = rows.slice(0, 12);
-  const notObserved = rows.filter((row) => row.presentCount === 0).length;
-  return `
-    <article class="metric-story">
-      ${metricHeading(
-        "Governed Semantic Field Usage",
-        "Shows privacy-thresholded aggregate field-presence counts for a governed standard and version. It contains no field values or raw payloads.",
-        rows.some((row) => row.evidenceMode === "controlled-demo") ? "Controlled demo" : `${notObserved} not observed`
-      )}
-      ${miniTable(
-        ["Standard", "Version", "Field", "Present / observed", "Usage", "Participants"],
-        topRows.map((row) => ({
-          cells: [
-            row.governedStandardId,
-            row.version,
-            row.fieldId,
-            `${row.presentCount} / ${row.observationCount}`,
-            formatRate(row.usageRate),
-            row.participantCount
-          ]
-        }))
-      )}
-    </article>
-  `;
-}
-
-function businessMessageUsageCard(rows) {
+function businessMessageUsageCard(rows, fieldUsageRows) {
   if (!rows.length) return emptyMetricCard("Business Message Usage");
+  const businessFields = fieldUsageRows.filter((row) => row.scope === "business-message").slice(0, 12);
   return `
     <article class="metric-story">
       ${metricHeading(
@@ -649,6 +607,20 @@ function businessMessageUsageCard(rows) {
           ]
         }))
       )}
+      ${businessFields.length ? `
+        <h3 class="metric-section-title">Element presence</h3>
+        ${miniTable(
+          ["Standard", "Version", "Element", "Present / observed", "Usage", "Participants"],
+          businessFields.map((row) => ({ cells: [
+            row.governedStandardId,
+            row.version,
+            row.fieldId,
+            `${row.presentCount} / ${row.observationCount}`,
+            formatRate(row.usageRate),
+            row.participantCount
+          ] }))
+        )}
+      ` : ""}
     </article>
   `;
 }
@@ -780,29 +752,6 @@ function deprecatedUsageCard(metric, artefacts, events) {
           formatDate(artefact.lastSeenAt)
         ],
         drilldownId: artefact.drilldownId
-      })))}
-    </article>
-  `;
-}
-
-function validationErrorCard(metric, events) {
-  const validationEvents = events.filter((event) => event.eventType === "metadata.validation.result");
-  if (!validationEvents.length) return emptyMetricCard("Semantic Validation Errors");
-  const categoryRows = topFailureCategoryRows(validationEvents);
-  return `
-    <article class="metric-story">
-      ${metricHeading(
-        "Semantic Validation Errors",
-        `The failed share of ${metric?.count ?? 0} metadata validation-result events. It covers semantic or configuration validation and does not include every technical message failure.`,
-        formatRate(boundedRate(metric?.metricValue ?? 0))
-      )}
-      ${miniTable(["Failure category", "Failures", "Share"], categoryRows.map((row) => ({
-        cells: [
-          row.label,
-          row.value,
-          formatRate(row.total ? row.value / row.total : 0)
-        ],
-        drilldownId: row.drilldownId
       })))}
     </article>
   `;
