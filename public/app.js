@@ -9,6 +9,7 @@ const elements = {
   refreshStatus: document.querySelector("#refreshStatus"),
   scenarioFilter: document.querySelector("#scenarioFilter"),
   participantFilter: document.querySelector("#participantFilter"),
+  governedStandardFilter: document.querySelector("#governedStandardFilter"),
   metricFilter: document.querySelector("#metricFilter"),
   ontologyFilter: document.querySelector("#ontologyFilter"),
   artefactTypeFilter: document.querySelector("#artefactTypeFilter"),
@@ -45,6 +46,7 @@ let refreshInProgress = false;
 let autoRefreshTimer;
 let streamRefreshTimer;
 let artefactOptions = [];
+const governedStandards = new Set();
 let latestTransactions = [];
 let latestEvents = [];
 let participantNames = new Map();
@@ -68,6 +70,7 @@ for (const element of [
   elements.refreshButton,
   elements.scenarioFilter,
   elements.participantFilter,
+  elements.governedStandardFilter,
   elements.metricFilter,
   elements.ontologyFilter,
   elements.artefactTypeFilter,
@@ -147,6 +150,7 @@ async function loadDashboard() {
       artefactOptionsPage,
       filteredArtefactsPage,
       versionValidationPage,
+      failureCausesPage,
       fieldUsagePage,
       businessMessageUsagePage
     ] = await Promise.all([
@@ -157,6 +161,7 @@ async function loadDashboard() {
       getJson(`/api/artefacts?${participantAndDateQuery().slice(1)}`),
       getJson(`/api/artefacts?${query.slice(1)}`),
       getJson(`/api/version-validation?${query.slice(1)}`),
+      getJson(`/api/failure-causes?${query.slice(1)}`),
       getJson(`/api/field-usage?${query.slice(1)}`),
       getJson(`/api/business-message-usage?${query.slice(1)}`)
     ]);
@@ -165,6 +170,7 @@ async function loadDashboard() {
     participantNames = new Map(participantsPage.data.map((participant) => [participant.participantId, participant.displayName]));
     renderOntologyOptions(artefactOptions);
     renderArtefactDimensionOptions(artefactOptions);
+    renderGovernedStandardOptions(eventsPage.data);
     renderSummary(report, eventsPage, transactionsPage);
     const observedParticipantIds = new Set(eventsPage.data.map((event) => event.source?.participantId).filter(Boolean));
     renderParticipants(elements.scenarioFilter.value
@@ -177,6 +183,7 @@ async function loadDashboard() {
       eventsPage.data,
       filteredArtefactsPage.data,
       versionValidationPage.data,
+      failureCausesPage.data,
       fieldUsagePage.data,
       businessMessageUsagePage.data
     );
@@ -249,6 +256,7 @@ function buildQuery() {
   const params = new URLSearchParams();
   if (elements.scenarioFilter.value) params.set("datasetCategory", elements.scenarioFilter.value);
   if (elements.participantFilter.value) params.set("participantId", elements.participantFilter.value);
+  if (elements.governedStandardFilter.value) params.set("governedStandardId", elements.governedStandardFilter.value);
   const selectedArtefact = selectedArtefactFilter();
   if (selectedArtefact) {
     params.set("artefactType", selectedArtefact.type);
@@ -436,6 +444,17 @@ function renderArtefactDimensionOptions(artefacts) {
   ]);
 }
 
+function renderGovernedStandardOptions(events) {
+  for (const event of events) {
+    if (event.attributes?.governedStandardId) governedStandards.add(event.attributes.governedStandardId);
+  }
+  preserveSelect(elements.governedStandardFilter, [
+    '<option value="">All specifications</option>',
+    ...unique([...governedStandards])
+      .map((standard) => `<option value="${escapeText(standard)}">${escapeText(standard)}</option>`)
+  ]);
+}
+
 function preserveSelect(select, optionHtml) {
   const currentValue = select.value;
   select.innerHTML = optionHtml.join("");
@@ -467,7 +486,7 @@ function renderTransactions(transactions) {
     : emptyRow(6, "No transactions recorded yet.");
 }
 
-function renderVisualizations(report, events, artefacts, versionValidation, fieldUsage, businessMessageUsage) {
+function renderVisualizations(report, events, artefacts, versionValidation, failureCauses, fieldUsage, businessMessageUsage) {
   drilldowns = new Map();
   const metricCards = [
     {
@@ -489,6 +508,10 @@ function renderVisualizations(report, events, artefacts, versionValidation, fiel
     {
       name: "validation_error_rate",
       html: validationErrorCard(findMetric(report, "validation_error_rate"), events)
+    },
+    {
+      name: "failure_causes",
+      html: failureCausesCard(failureCauses)
     },
     {
       name: "version_validation_errors",
@@ -531,6 +554,30 @@ function versionValidationCard(rows) {
             formatRate(row.failureShare)
           ]
         }))
+      )}
+    </article>
+  `;
+}
+
+function failureCausesCard(rows) {
+  if (!rows.length) return emptyMetricCard("Observed Failure Causes");
+  return `
+    <article class="metric-story">
+      <div class="viz-heading">
+        <div>
+          <h2>Observed Failure Causes</h2>
+          <div class="muted">Coarse categories derived from failed TSG events; diagnostic signals, not proven root causes.</div>
+        </div>
+        <strong>${rows.reduce((total, row) => total + row.failureCount, 0)} failures</strong>
+      </div>
+      ${miniTable(
+        ["Cause group", "Failures", "Share", "Observed labels"],
+        rows.map((row) => ({ cells: [
+          row.category,
+          row.failureCount,
+          formatRate(row.failureShare),
+          row.observedCategories.map(label).join(", ") || "Not classified"
+        ] }))
       )}
     </article>
   `;
@@ -620,7 +667,7 @@ function semanticCoverageCard(metric, events) {
       <div class="viz-heading">
         <div>
           <h2>Ontology Coverage</h2>
-          <div class="muted">${metric?.count ?? 0} adoption observations</div>
+          <div class="muted">${metric?.count ?? 0} adoption observations. “Missing” means no ontology or semantic-model reference was observed; it does not prove that none exists or that interoperability failed.</div>
         </div>
         <strong>${formatRate(value)}</strong>
       </div>
@@ -745,7 +792,7 @@ function validationErrorCard(metric, events) {
       <div class="viz-heading">
         <div>
           <h2>Semantic Validation Errors</h2>
-          <div class="muted">${metric?.count ?? 0} validation observations</div>
+          <div class="muted">${metric?.count ?? 0} metadata validation-result events; this does not cover every technical message failure.</div>
         </div>
         <strong>${formatRate(boundedRate(metric?.metricValue ?? 0))}</strong>
       </div>

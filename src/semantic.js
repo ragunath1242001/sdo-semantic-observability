@@ -51,6 +51,10 @@ export function filterEvents(events, filter = {}) {
     if (filter.component && event.component !== filter.component) return false;
     if (filter.eventType && event.eventType !== filter.eventType) return false;
     if (filter.status && event.status !== filter.status) return false;
+    if (
+      filter.governedStandardId &&
+      scalarString(event.attributes?.governedStandardId) !== filter.governedStandardId
+    ) return false;
     if (filter.datasetCategory && event.context?.datasetCategory !== filter.datasetCategory) return false;
     if (filter.datasetPseudonym && event.context?.datasetPseudonym !== filter.datasetPseudonym) return false;
     if (filter.participantPairPseudonym && event.context?.participantPairPseudonym !== filter.participantPairPseudonym) return false;
@@ -75,6 +79,28 @@ export function filterEvents(events, filter = {}) {
     }
     return true;
   });
+}
+
+export function buildFailureCauses(events, filter = {}) {
+  const failures = filterEvents(events, filter).filter((event) => event.status === "failure");
+  const groups = new Map();
+
+  for (const event of failures) {
+    const category = failureCauseCategory(event);
+    const current = groups.get(category) ?? { category, failureCount: 0, observedCategories: new Set() };
+    current.failureCount += 1;
+    if (event.failureCategory) current.observedCategories.add(event.failureCategory);
+    groups.set(category, current);
+  }
+
+  return [...groups.values()]
+    .map((group) => ({
+      category: group.category,
+      failureCount: group.failureCount,
+      failureShare: rate(group.failureCount, failures.length),
+      observedCategories: [...group.observedCategories].sort()
+    }))
+    .sort((a, b) => b.failureCount - a.failureCount || a.category.localeCompare(b.category));
 }
 
 export function buildArtefacts(events, filter = {}) {
@@ -440,6 +466,15 @@ function successCount(events) {
 
 function failureCount(events) {
   return events.filter((event) => event.status === "failure").length;
+}
+
+function failureCauseCategory(event) {
+  if (event.eventType === "metadata.validation.result") return "Validation / semantic";
+  if (event.eventType === "policy.evaluation.result") return "Policy / authorization";
+  if (event.eventType === "negotiation.state.changed") return "Negotiation";
+  if (event.eventType === "transfer.state.changed") return "Transfer";
+  if (event.eventType === "data-plane.access.observed") return "Technical / access";
+  return "Other / unclassified";
 }
 
 function artefactCoverage(events, artefactTypes) {

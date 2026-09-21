@@ -13,6 +13,7 @@ import {
 import {
   buildArtefacts,
   buildBusinessMessageUsage,
+  buildFailureCauses,
   buildFieldUsage,
   buildReport,
   buildTransactions,
@@ -155,6 +156,12 @@ const server = createServer(async (request, response) => {
         queryFilter(url),
         fieldUsageMinimumParticipants
       );
+      return json(response, 200, { data, total: data.length });
+    }
+
+    if (request.method === "GET" && url.pathname === "/api/failure-causes") {
+      const events = await store.readAll();
+      const data = buildFailureCauses(events, queryFilter(url));
       return json(response, 200, { data, total: data.length });
     }
 
@@ -437,6 +444,7 @@ function queryFilter(url) {
     "component",
     "eventType",
     "status",
+    "governedStandardId",
     "datasetCategory",
     "datasetPseudonym",
     "participantPairPseudonym",

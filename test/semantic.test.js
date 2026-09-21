@@ -6,6 +6,7 @@ import { renameParticipant } from "../src/participants.js";
 import {
   buildArtefacts,
   buildBusinessMessageUsage,
+  buildFailureCauses,
   buildFieldUsage,
   buildReport,
   buildVersionValidation
@@ -112,6 +113,44 @@ test("aggregates only thresholded field-presence counts from multiple participan
   assert.equal(rows[1].usageRate, 0.5);
   assert.equal(buildFieldUsage(events, { artefactVersion: "2.1" }).length, 2);
   assert.equal(buildFieldUsage(events, { artefactVersion: "2.0" }).length, 0);
+});
+
+test("filters governed specifications and groups observed failure causes", () => {
+  const events = [
+    event({
+      eventType: "metadata.validation.result",
+      status: "failure",
+      failureCategory: "missing_required_field",
+      attributes: { governedStandardId: "SETU HumanResource", governedVersion: "2.0.1" }
+    }),
+    event({
+      eventType: "data-plane.access.observed",
+      status: "failure",
+      failureCategory: "backend_or_proxy_error",
+      attributes: { governedStandardId: "SETU HumanResource", governedVersion: "2.0.1" }
+    }),
+    event({
+      eventType: "transfer.state.changed",
+      status: "failure",
+      failureCategory: "transfer_interrupted",
+      attributes: { governedStandardId: "Other standard", governedVersion: "1.0" }
+    })
+  ];
+
+  assert.deepEqual(buildFailureCauses(events, { governedStandardId: "SETU HumanResource" }), [
+    {
+      category: "Technical / access",
+      failureCount: 1,
+      failureShare: 0.5,
+      observedCategories: ["backend_or_proxy_error"]
+    },
+    {
+      category: "Validation / semantic",
+      failureCount: 1,
+      failureShare: 0.5,
+      observedCategories: ["missing_required_field"]
+    }
+  ]);
 });
 
 test("compares controlled SETU HumanResource usage without exposing message values", () => {
