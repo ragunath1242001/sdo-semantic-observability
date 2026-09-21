@@ -480,6 +480,59 @@ select {
   white-space: nowrap;
 }
 
+.metric-title-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.metric-help {
+  position: relative;
+}
+
+.metric-help summary {
+  display: grid;
+  place-items: center;
+  width: 1.35rem;
+  height: 1.35rem;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--accent-bright);
+  cursor: pointer;
+  font-size: 0.78rem;
+  font-weight: 900;
+  list-style: none;
+}
+
+.metric-help summary::-webkit-details-marker {
+  display: none;
+}
+
+.metric-help summary:hover,
+.metric-help summary:focus-visible {
+  border-color: var(--accent-bright);
+  outline: none;
+}
+
+.metric-help-card {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 0.55rem);
+  left: 0;
+  width: min(22rem, calc(100vw - 4rem));
+  padding: 0.8rem;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: var(--glass-shadow);
+  color: var(--text);
+  font-size: 0.82rem;
+  font-weight: 500;
+  line-height: 1.5;
+}
+
 .donut {
   border: 0;
   display: grid;

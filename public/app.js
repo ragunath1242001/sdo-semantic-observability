@@ -57,6 +57,17 @@ let appliedDateRange;
 const autoRefreshIntervalMs = 5000;
 const previewRowLimit = 5;
 const dateSliderStart = new Date("2020-01-01T00:00:00.000Z");
+const metricExplanations = {
+  "Ontology Coverage": "The share of adoption observations containing an ontology or semantic-model reference. “Missing” means no reference was observed; it does not prove that no ontology exists or that interoperability failed.",
+  "Schema Reference Coverage": "The share of adoption observations containing a schema or OpenAPI reference. “Missing” means no reference was observed in that event, not that no schema exists.",
+  "Artefact Version Adoption": "The share of observed semantic artefact references that include a version. It reports observed metadata, not conformance with that version.",
+  "Deprecated Artefact Usage": "The share of observed artefact references marked deprecated, obsolete, or legacy by their metadata or controlled identifier.",
+  "Semantic Validation Errors": "The failed share of metadata validation-result events. It does not include every technical message failure.",
+  "Observed Failure Causes": "Groups failed TSG events into coarse diagnostic categories. These categories are not confirmed technical root causes.",
+  "Validation Errors by Governed Version": "Groups metadata validation results by declared standard and version. The association does not prove that a version caused a failure.",
+  "Governed Semantic Field Usage": "Shows privacy-thresholded aggregate field-presence counts. It contains no field values or raw payloads.",
+  "Business Message Usage": "Compares privacy-safe aggregate message counts, declared-version use, and element population. No message bodies or field values are exported."
+};
 
 elements.themeToggle.checked = document.documentElement.dataset.theme === "dark";
 elements.themeToggle.addEventListener("change", () => {
@@ -487,6 +498,10 @@ function renderTransactions(transactions) {
 }
 
 function renderVisualizations(report, events, artefacts, versionValidation, failureCauses, fieldUsage, businessMessageUsage) {
+  const openExplanations = new Set(
+    [...elements.visualizationGrid.querySelectorAll(".metric-help[open] summary")]
+      .map((summary) => summary.getAttribute("aria-label"))
+  );
   drilldowns = new Map();
   const metricCards = [
     {
@@ -528,6 +543,9 @@ function renderVisualizations(report, events, artefacts, versionValidation, fail
   ].filter((card) => !elements.metricFilter.value || card.name === elements.metricFilter.value);
 
   elements.visualizationGrid.innerHTML = metricCards.map((card) => card.html).join("");
+  for (const help of elements.visualizationGrid.querySelectorAll(".metric-help")) {
+    help.open = openExplanations.has(help.querySelector("summary")?.getAttribute("aria-label"));
+  }
 }
 
 function versionValidationCard(rows) {
@@ -535,13 +553,11 @@ function versionValidationCard(rows) {
   const topRows = rows.slice(0, 8);
   return `
     <article class="metric-story">
-      <div class="viz-heading">
-        <div>
-          <h2>Validation Errors by Governed Version</h2>
-          <div class="muted">Association only; this does not establish causation.</div>
-        </div>
-        <strong>${rows.reduce((total, row) => total + row.failureCount, 0)} failures</strong>
-      </div>
+      ${metricHeading(
+        "Validation Errors by Governed Version",
+        "Groups metadata validation results by declared standard and version. It shows association only and does not prove that a version caused a failure.",
+        `${rows.reduce((total, row) => total + row.failureCount, 0)} failures`
+      )}
       ${miniTable(
         ["Standard", "Version", "Validations", "Failures", "Error rate", "Share of failures"],
         topRows.map((row) => ({
@@ -563,13 +579,11 @@ function failureCausesCard(rows) {
   if (!rows.length) return emptyMetricCard("Observed Failure Causes");
   return `
     <article class="metric-story">
-      <div class="viz-heading">
-        <div>
-          <h2>Observed Failure Causes</h2>
-          <div class="muted">Coarse categories derived from failed TSG events; diagnostic signals, not proven root causes.</div>
-        </div>
-        <strong>${rows.reduce((total, row) => total + row.failureCount, 0)} failures</strong>
-      </div>
+      ${metricHeading(
+        "Observed Failure Causes",
+        "Groups failed TSG events using their event type and reported failure category. These are coarse diagnostic signals, not confirmed technical root causes.",
+        `${rows.reduce((total, row) => total + row.failureCount, 0)} failures`
+      )}
       ${miniTable(
         ["Cause group", "Failures", "Share", "Observed labels"],
         rows.map((row) => ({ cells: [
@@ -589,13 +603,11 @@ function fieldUsageCard(rows) {
   const notObserved = rows.filter((row) => row.presentCount === 0).length;
   return `
     <article class="metric-story">
-      <div class="viz-heading">
-        <div>
-          <h2>Governed Semantic Field Usage</h2>
-          <div class="muted">Thresholded presence counts only; no values or raw payloads.</div>
-        </div>
-        <strong>${rows.some((row) => row.evidenceMode === "controlled-demo") ? "Controlled demo" : `${notObserved} not observed`}</strong>
-      </div>
+      ${metricHeading(
+        "Governed Semantic Field Usage",
+        "Shows privacy-thresholded aggregate field-presence counts for a governed standard and version. It contains no field values or raw payloads.",
+        rows.some((row) => row.evidenceMode === "controlled-demo") ? "Controlled demo" : `${notObserved} not observed`
+      )}
       ${miniTable(
         ["Standard", "Version", "Field", "Present / observed", "Usage", "Participants"],
         topRows.map((row) => ({
@@ -617,13 +629,11 @@ function businessMessageUsageCard(rows) {
   if (!rows.length) return emptyMetricCard("Business Message Usage");
   return `
     <article class="metric-story">
-      <div class="viz-heading">
-        <div>
-          <h2>Business Message Usage</h2>
-          <div class="muted">Controlled, privacy-safe summaries; no message bodies or field values.</div>
-        </div>
-        <strong>${rows[0].evidenceMode === "controlled-demo" ? "Controlled demo" : escapeText(rows[0].evidenceMode)}</strong>
-      </div>
+      ${metricHeading(
+        "Business Message Usage",
+        "Compares privacy-safe aggregate message counts, declared-version use, and element population across time windows. No message bodies or field values are exported.",
+        rows[0].evidenceMode === "controlled-demo" ? "Controlled demo" : rows[0].evidenceMode
+      )}
       ${miniTable(
         ["Period", "Standard", "Version", "Version use", "Element", "Populated", "Change", "Participants"],
         rows.slice(0, 8).map((row) => ({
@@ -664,13 +674,11 @@ function semanticCoverageCard(metric, events) {
   const missingId = addDrilldown("Missing ontology", "Adoption events without ontology or semantic model artefacts.", missingEvents);
   return `
     <article class="metric-story">
-      <div class="viz-heading">
-        <div>
-          <h2>Ontology Coverage</h2>
-          <div class="muted">${metric?.count ?? 0} adoption observations. “Missing” means no ontology or semantic-model reference was observed; it does not prove that none exists or that interoperability failed.</div>
-        </div>
-        <strong>${formatRate(value)}</strong>
-      </div>
+      ${metricHeading(
+        "Ontology Coverage",
+        `The share of ${metric?.count ?? 0} adoption observations containing an ontology or semantic-model reference. “Missing” means no reference was observed; it does not prove that no ontology exists or that interoperability failed.`,
+        formatRate(value)
+      )}
       <div class="metric-story-body">
         <div class="visual-pane">
           ${donut(value, "#3369ff", referencedId)}
@@ -700,13 +708,11 @@ function schemaCoverageCard(metric, events) {
   const missingId = addDrilldown("Missing schema", "Adoption events without schema or OpenAPI artefacts.", missingEvents);
   return `
     <article class="metric-story">
-      <div class="viz-heading">
-        <div>
-          <h2>Schema Reference Coverage</h2>
-          <div class="muted">${metric?.count ?? 0} adoption observations</div>
-        </div>
-        <strong>${formatRate(value)}</strong>
-      </div>
+      ${metricHeading(
+        "Schema Reference Coverage",
+        `The share of ${metric?.count ?? 0} adoption observations containing a schema or OpenAPI reference. “Missing” means no reference was observed in that event, not that no schema exists.`,
+        formatRate(value)
+      )}
       <div class="metric-story-body">
         <div class="visual-pane">
           <div class="stacked-bar" aria-label="Schema coverage">
@@ -732,13 +738,11 @@ function versionAdoptionCard(metric, artefacts, events) {
   const versionRows = topVersionRows(artefacts, events);
   return `
     <article class="metric-story">
-      <div class="viz-heading">
-        <div>
-          <h2>Artefact Version Adoption</h2>
-          <div class="muted">${metric?.count ?? 0} artefact observations</div>
-        </div>
-        <strong>${formatRate(boundedRate(metric?.metricValue ?? 0))}</strong>
-      </div>
+      ${metricHeading(
+        "Artefact Version Adoption",
+        `The share of ${metric?.count ?? 0} observed semantic artefact references that include a version. It reports observed metadata, not conformance with that version.`,
+        formatRate(boundedRate(metric?.metricValue ?? 0))
+      )}
       ${miniTable(["Artefact", "Version", "Events", "Participants"], versionRows.map((row) => ({
         cells: [row.label, row.version, row.value, row.participants],
         drilldownId: row.drilldownId
@@ -763,13 +767,11 @@ function deprecatedUsageCard(metric, artefacts, events) {
     }));
   return `
     <article class="metric-story">
-      <div class="viz-heading">
-        <div>
-          <h2>Deprecated Artefact Usage</h2>
-          <div class="muted">${metric?.count ?? 0} artefact observations</div>
-        </div>
-        <strong>${formatRate(boundedRate(metric?.metricValue ?? 0))}</strong>
-      </div>
+      ${metricHeading(
+        "Deprecated Artefact Usage",
+        `The share of ${metric?.count ?? 0} observed artefact references marked deprecated, obsolete, or legacy by their metadata or controlled identifier.`,
+        formatRate(boundedRate(metric?.metricValue ?? 0))
+      )}
       ${miniTable(["Deprecated artefact", "Version", "Participants", "Last used"], deprecated.map((artefact) => ({
         cells: [
           `${label(artefact.type)}: ${artefactName(artefact)}`,
@@ -789,13 +791,11 @@ function validationErrorCard(metric, events) {
   const categoryRows = topFailureCategoryRows(validationEvents);
   return `
     <article class="metric-story">
-      <div class="viz-heading">
-        <div>
-          <h2>Semantic Validation Errors</h2>
-          <div class="muted">${metric?.count ?? 0} metadata validation-result events; this does not cover every technical message failure.</div>
-        </div>
-        <strong>${formatRate(boundedRate(metric?.metricValue ?? 0))}</strong>
-      </div>
+      ${metricHeading(
+        "Semantic Validation Errors",
+        `The failed share of ${metric?.count ?? 0} metadata validation-result events. It covers semantic or configuration validation and does not include every technical message failure.`,
+        formatRate(boundedRate(metric?.metricValue ?? 0))
+      )}
       ${miniTable(["Failure category", "Failures", "Share"], categoryRows.map((row) => ({
         cells: [
           row.label,
@@ -968,9 +968,24 @@ function emptyViz(text) {
 function emptyMetricCard(title) {
   return `
     <article class="metric-story">
-      <div class="viz-heading"><h2>${escapeText(title)}</h2></div>
+      ${metricHeading(title, metricExplanations[title] ?? "This metric has no matching observations in the selected window.")}
       ${emptyViz("No matching data in this window.")}
     </article>
+  `;
+}
+
+function metricHeading(title, explanation, value) {
+  return `
+    <div class="viz-heading">
+      <div class="metric-title-row">
+        <h2>${escapeText(title)}</h2>
+        <details class="metric-help">
+          <summary aria-label="Explain ${escapeText(title)}" title="Explain this metric">?</summary>
+          <div class="metric-help-card">${escapeText(explanation)}</div>
+        </details>
+      </div>
+      ${value ? `<strong>${escapeText(value)}</strong>` : ""}
+    </div>
   `;
 }
 
